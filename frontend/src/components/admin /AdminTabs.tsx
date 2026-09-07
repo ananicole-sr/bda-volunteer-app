@@ -7,9 +7,9 @@ export default function AdminTabs() {
   const pathname = usePathname();
 
   const tabs = [
-    { name: 'Home' , path: '/admin' },
-    { name: 'Rewards', path: '/admin/rewards' },
-    { name: 'Live Feed', path: '/admin/notifications' },
+    { name: 'Dashboard' , path: '/admin' },
+    { name: 'Recompensas', path: '/admin/rewards' },
+    { name: 'Notificaciones', path: '/admin/notifications' },
   ];
 
   return (
