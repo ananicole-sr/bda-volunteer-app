@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, TextInput, ScrollView } from 'react-native';
+import { View, TextInput, ScrollView, RefreshControl } from 'react-native';
 import VolunteerRow from './VolunteerRow';
 
 interface Volunteer {
@@ -13,9 +13,11 @@ interface Volunteer {
 
 interface AdminTableProps {
   data: Volunteer[];
+  refreshing?: boolean;
+  onRefresh?: () => void;
 }
 
-export default function AdminTable({ data }: AdminTableProps) {
+export default function AdminTable({ data, refreshing = false, onRefresh }: AdminTableProps) {
   const [searchQuery, setSearchQuery] = useState('');
 
   const filteredVolunteers = data.filter(v => 
@@ -35,7 +37,13 @@ export default function AdminTable({ data }: AdminTableProps) {
         />
       </View>
 
-      <ScrollView contentContainerStyle={{ paddingBottom: 20 }} showsVerticalScrollIndicator={false}>
+      <ScrollView
+        contentContainerStyle={{ paddingBottom: 20 }}
+        showsVerticalScrollIndicator={false}
+        refreshControl={
+          onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined
+        }
+      >
         {filteredVolunteers.map((v) => (
           <VolunteerRow 
             key={v.id}
