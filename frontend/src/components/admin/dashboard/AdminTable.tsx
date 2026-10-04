@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, TextInput, ScrollView, RefreshControl } from 'react-native';
 import VolunteerRow from './VolunteerRow';
 
+
 interface Volunteer {
   id: string;
   name: string;
@@ -44,9 +45,11 @@ export default function AdminTable({ data, refreshing = false, onRefresh }: Admi
           onRefresh ? <RefreshControl refreshing={refreshing} onRefresh={onRefresh} /> : undefined
         }
       >
+        
         {filteredVolunteers.map((v) => (
-          <VolunteerRow 
+          <VolunteerRow
             key={v.id}
+            id={v.id}
             name={v.name}
             community={v.community}
             points={v.points}

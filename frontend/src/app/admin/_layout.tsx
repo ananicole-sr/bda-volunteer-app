@@ -1,8 +1,8 @@
 import React from 'react';
 import { View } from 'react-native';
 import { Slot } from 'expo-router';
-import AdminTabs from '../../components/admin /AdminTabs';
-import AdminHeader from '../../components/admin /AdminHeader';
+import AdminTabs from '../../components/admin/AdminTabs';
+import AdminHeader from '../../components/admin/AdminHeader';
 
 export default function AdminLayout() {
   return (

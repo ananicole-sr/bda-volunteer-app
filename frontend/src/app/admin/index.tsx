@@ -1,8 +1,8 @@
 import React, { useCallback, useEffect, useState } from 'react';
 import { View, Text, ActivityIndicator, RefreshControl, ScrollView } from 'react-native';
 
-import RegisterButton from '@/components/admin /RegisterButton';
-import AdminTable from '@/components/admin /AdminTable';
+import RegisterButton from '@/components/admin/dashboard/RegisterButton';
+import AdminTable from '@/components/admin/dashboard/AdminTable';
 import { getVolunteers } from '@/services/volunteers';
 import type { Volunteer } from '@/types/volunteer';
 
