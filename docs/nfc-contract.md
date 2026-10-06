@@ -6,7 +6,7 @@ Headers: Authorization: Bearer <access_token del usuario>, apikey: <anon key>, C
 
 ## UID
 Hex en MAYÚSCULAS, sin separadores. Longitudes válidas: 8, 14 o 20 caracteres (4, 7 o 10 bytes).
-El cliente normaliza antes de enviar; el servidor vuelve a normalizar y rechaza lo inválido.
+El cliente normaliza antes de enviar; el servidor vuelve a normalizar y rechaza lo inválido. 
 
 ## Funciones
 1) check-in (roles: guard, admin)
