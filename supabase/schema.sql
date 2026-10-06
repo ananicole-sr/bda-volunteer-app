@@ -21,8 +21,18 @@
 -- Cómo correrlo:
 --   1. Crear un proyecto en https://supabase.com
 --   2. Abrir el SQL editor del proyecto y pegar/correr este archivo completo
---   3. Correr seed.sql para tener datos de prueba (los mismos 3 voluntarios
---      que hoy están hardcoded en el frontend)
+--   3. Correr 002_nfc_security.sql (profiles, cards, RLS por rol, funciones
+--      del check-in NFC) — ver docs/nfc-contract.md. Requiere SET
+--      app.card_hmac_secret ANTES de correrlo (hace backfill + elimina
+--      volunteers.nfc_uid).
+--   4. Correr seed.sql para tener datos de prueba (los mismos 3 voluntarios
+--      que hoy están hardcoded en el frontend). También requiere
+--      app.card_hmac_secret por el mismo motivo.
+--
+-- NOTA (002_nfc_security.sql): volunteers.nfc_uid, creada mas abajo, se borra
+-- en esa migracion (su contenido pasa a la tabla cards como HMAC). Este
+-- archivo se deja sin tocar para que siga siendo el historial real de como
+-- se creo el esquema; no es el estado actual de volunteers.
 -- ============================================================================
 
 create extension if not exists "pgcrypto";

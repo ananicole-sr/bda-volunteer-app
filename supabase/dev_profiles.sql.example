@@ -1,0 +1,24 @@
+-- ============================================================================
+-- Plantilla para dar de alta los profiles de las cuentas de desarrollo.
+--
+-- Antes de correr esto:
+--   1. Crea en Supabase Auth (Authentication -> Users -> Add user) las
+--      cuentas admin@bamx.test y guard@bamx.test (ver docs/nfc-contract.md).
+--   2. Copia este archivo a dev_profiles.sql (ignorado por git, ver .gitignore).
+--   3. Corre el resultado en el SQL editor del proyecto, con esos usuarios
+--      ya creados en auth.users.
+--
+-- No hace falta copiar UUIDs a mano: busca el id por email directamente en
+-- auth.users.
+-- ============================================================================
+
+insert into profiles (id, role)
+select id, 'admin' from auth.users where email = 'admin@bamx.test'
+on conflict (id) do update set role = excluded.role;
+
+insert into profiles (id, role)
+select id, 'guard' from auth.users where email = 'guard@bamx.test'
+on conflict (id) do update set role = excluded.role;
+
+-- Verificacion rapida:
+-- select p.id, p.role, u.email from profiles p join auth.users u on u.id = p.id;

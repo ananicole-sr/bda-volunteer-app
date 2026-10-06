@@ -9,3 +9,6 @@ node_modules/
 .idea/
 
 .DS_Store
+
+# Plantilla de supabase/dev_profiles.sql.example ya copiada con datos reales
+supabase/dev_profiles.sql
