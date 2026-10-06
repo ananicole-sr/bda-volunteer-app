@@ -26,7 +26,7 @@ function mapRowToVolunteer(row: VolunteerRow): Volunteer {
 export async function getVolunteers(): Promise<Volunteer[]> {
   const { data, error } = await supabase
     .from('volunteers')
-    .select('id, nfc_uid, full_name, community, avatar_url, points, last_check_in_at, is_active')
+    .select('id, full_name, community, avatar_url, points, last_check_in_at, is_active')
     .eq('is_active', true)
     .order('last_check_in_at', { ascending: false, nullsFirst: false });
 
@@ -43,7 +43,7 @@ export async function getVolunteerById(
   const { data, error } = await supabase
     .from('volunteers')
     .select(
-      'id, nfc_uid, full_name, community, avatar_url, points, last_check_in_at, is_active'
+      'id, full_name, community, avatar_url, points, last_check_in_at, is_active'
     )
     .eq('id', id)
     .single();
