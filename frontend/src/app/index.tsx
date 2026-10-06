@@ -1,6 +1,8 @@
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
-import { useRouter } from 'expo-router';
+import { Href, useRouter } from 'expo-router';
+
+const loginRoute = '/login' as Href;
 
 export default function HomeScreen() {
   const router = useRouter();
@@ -16,9 +18,9 @@ export default function HomeScreen() {
 
       <TouchableOpacity 
         className="w-full max-w-sm bg-[#e88e29] py-4 rounded-2xl shadow-sm items-center active:opacity-90"
-        onPress={() => router.push('/admin')}
+        onPress={() => router.push(loginRoute)}
       >
-        <Text className="text-white font-bold text-base">Open Admin UI</Text>
+        <Text className="text-white font-bold text-base">Entrar al admin</Text>
       </TouchableOpacity>
             
     </View>
