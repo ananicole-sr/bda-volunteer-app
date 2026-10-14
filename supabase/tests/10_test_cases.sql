@@ -561,6 +561,76 @@ end;
 $$;
 
 
+-- ----------------------------------------------------------------------------
+-- Caso 14: reward_redemptions solo admin; point_tiers solo staff; ninguna
+-- policy de lectura queda abierta (using true) para anon.
+-- ----------------------------------------------------------------------------
+do $$
+declare
+  v_admin   uuid := '10000000-0000-0000-0000-000000000001';
+  v_guard   uuid := '10000000-0000-0000-0000-000000000002';
+  v_noprof  uuid := '10000000-0000-0000-0000-000000000003';
+  v_vol     uuid;
+  v_reward  uuid;
+  v_rr_anon int; v_rr_noprof int; v_rr_guard int; v_rr_admin int;
+  v_pt_anon int; v_pt_noprof int; v_pt_guard int; v_pt_admin int;
+  v_open    int;
+begin
+  insert into auth.users (id, email) values (v_noprof, 'noprofile@test.local');
+  insert into volunteers (full_name, community) values ('Test RR', 'x') returning id into v_vol;
+  insert into rewards (name, points_cost, stock) values ('Test reward', 10, 1) returning id into v_reward;
+  insert into reward_redemptions (volunteer_id, reward_id, points_spent) values (v_vol, v_reward, 10);
+
+  set role anon;
+  select count(*) into v_rr_anon from reward_redemptions;
+  select count(*) into v_pt_anon from point_tiers;
+  reset role;
+
+  set role authenticated;
+  set request.jwt.claim.role = 'authenticated';
+  set request.jwt.claim.sub = '10000000-0000-0000-0000-000000000003';
+  select count(*) into v_rr_noprof from reward_redemptions;
+  select count(*) into v_pt_noprof from point_tiers;
+  set request.jwt.claim.sub = '10000000-0000-0000-0000-000000000002';
+  select count(*) into v_rr_guard from reward_redemptions;
+  select count(*) into v_pt_guard from point_tiers;
+  set request.jwt.claim.sub = '10000000-0000-0000-0000-000000000001';
+  select count(*) into v_rr_admin from reward_redemptions;
+  select count(*) into v_pt_admin from point_tiers;
+  reset role;
+  reset request.jwt.claim.role;
+  reset request.jwt.claim.sub;
+
+  select count(*) into v_open from pg_policies
+  where schemaname = 'public' and cmd in ('SELECT', 'ALL') and trim(qual) = 'true';
+
+  insert into test_results (case_name, status, detail) values (
+    'anon no lee reward_redemptions ni point_tiers',
+    case when v_rr_anon = 0 and v_pt_anon = 0 then 'PASS' else 'FAIL' end,
+    format('rr=%s pt=%s', v_rr_anon, v_pt_anon));
+  insert into test_results (case_name, status, detail) values (
+    'autenticado sin perfil de staff no lee reward_redemptions ni point_tiers',
+    case when v_rr_noprof = 0 and v_pt_noprof = 0 then 'PASS' else 'FAIL' end,
+    format('rr=%s pt=%s', v_rr_noprof, v_pt_noprof));
+  insert into test_results (case_name, status, detail) values (
+    'guard NO lee reward_redemptions pero si point_tiers',
+    case when v_rr_guard = 0 and v_pt_guard > 0 then 'PASS' else 'FAIL' end,
+    format('rr=%s pt=%s', v_rr_guard, v_pt_guard));
+  insert into test_results (case_name, status, detail) values (
+    'admin lee reward_redemptions y point_tiers',
+    case when v_rr_admin = 1 and v_pt_admin > 0 then 'PASS' else 'FAIL' end,
+    format('rr=%s pt=%s', v_rr_admin, v_pt_admin));
+  insert into test_results (case_name, status, detail) values (
+    'no queda ninguna policy de lectura using (true)',
+    case when v_open = 0 then 'PASS' else 'FAIL' end,
+    format('policies_abiertas=%s', v_open));
+exception when others then
+  reset role;
+  insert into test_results (case_name, status, detail) values ('reward_redemptions/point_tiers cerradas', 'FAIL', 'error inesperado: ' || sqlerrm);
+end;
+$$;
+
+
 -- ============================================================================
 -- Reporte final
 -- ============================================================================

@@ -461,9 +461,9 @@ revoke update, delete on audit_logs from public, anon, authenticated, service_ro
 
 -- ----------------------------------------------------------------------------
 -- 7. RLS: reemplaza las lecturas abiertas ("using (true)", sin sesion) de
---    schema.sql por lecturas que exigen admin/guard (o admin para
---    audit_logs). point_tiers y reward_redemptions no estan en el alcance
---    de este contrato y se dejan como estaban.
+--    schema.sql por lecturas que exigen admin/guard (is_staff) o solo admin
+--    (audit_logs y reward_redemptions). Ninguna policy de lectura queda
+--    abierta a anon.
 -- ----------------------------------------------------------------------------
 drop policy if exists "volunteers_read" on volunteers;
 create policy "volunteers_read_staff" on volunteers
@@ -479,6 +479,14 @@ create policy "rewards_read_staff" on rewards
 
 drop policy if exists "audit_logs_read" on audit_logs;
 create policy "audit_logs_read_admin" on audit_logs
+  for select using (is_admin());
+
+drop policy if exists "point_tiers_read" on point_tiers;
+create policy "point_tiers_read_staff" on point_tiers
+  for select using (is_staff());
+
+drop policy if exists "reward_redemptions_read" on reward_redemptions;
+create policy "reward_redemptions_read_admin" on reward_redemptions
   for select using (is_admin());
 
 -- Nota: profiles ya quedo con su propia policy ("profiles_read_own") en la
