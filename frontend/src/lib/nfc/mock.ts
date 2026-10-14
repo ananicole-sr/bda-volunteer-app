@@ -20,8 +20,9 @@ export class MockNfcReader implements NfcReader {
     this.nextUid = uid;
   }
 
-  readUid(): Promise<string> {
-    return Promise.resolve(normalizeUid(this.nextUid));
+  // async: un UID invalido debe RECHAZAR la promesa (como el lector real), no lanzar de forma sincrona.
+  async readUid(): Promise<string> {
+    return normalizeUid(this.nextUid);
   }
 
   cancel(): void {
