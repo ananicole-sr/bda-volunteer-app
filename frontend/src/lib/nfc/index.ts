@@ -1,27 +1,12 @@
 import { MockNfcReader } from './mock';
-import { NfcError, type NfcReader } from './types';
+import { RealNfcReader } from './real';
+import type { NfcReader } from './types';
 
 export { NfcError } from './types';
 export type { NfcErrorCode, NfcReader } from './types';
 export { normalizeUid, VALID_UID_LENGTHS } from './uid';
 export { DEFAULT_MOCK_UID, MockNfcReader } from './mock';
-
-/**
- * Marcador de posicion hasta que la Fase 3 traiga el lector real
- * (react-native-nfc-manager). Cumple la interfaz del contrato fallando con
- * code 'unavailable' en vez de reventar en el import.
- */
-class UnavailableNfcReader implements NfcReader {
-  readUid(): Promise<string> {
-    return Promise.reject(
-      new NfcError('unavailable', 'Lector NFC real no implementado todavia (Fase 3)')
-    );
-  }
-
-  cancel(): void {
-    // Nada que liberar: nunca se abrio una sesion.
-  }
-}
+export { DEFAULT_READ_TIMEOUT_MS, RealNfcReader } from './real';
 
 let reader: NfcReader | null = null;
 
@@ -33,7 +18,7 @@ let reader: NfcReader | null = null;
 export function getNfcReader(): NfcReader {
   if (!reader) {
     reader =
-      process.env.EXPO_PUBLIC_NFC_MOCK === '1' ? new MockNfcReader() : new UnavailableNfcReader();
+      process.env.EXPO_PUBLIC_NFC_MOCK === '1' ? new MockNfcReader() : new RealNfcReader();
   }
 
   return reader;
