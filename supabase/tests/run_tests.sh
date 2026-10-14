@@ -82,11 +82,36 @@ rm -f "$GUARD_OUT"
 "$PSQL" -d postgres -c "drop database if exists \"$GUARDDB\";" >/dev/null 2>&1
 
 echo
+echo "== [2b] Backfill: nfc_uid de longitud no admitida se omite con NOTICE =="
+BFDB="${BFDB:-nfc_security_test_backfill_len}"
+prepare_db "$BFDB"
+"$PSQL" -d "$BFDB" -v ON_ERROR_STOP=1 -q   -f "$SCRIPT_DIR/00_fixtures.sql" -f "$SUPABASE_DIR/schema.sql"   || fail_setup "no se pudo preparar el esquema base en $BFDB"
+"$PSQL" -d "$BFDB" -v ON_ERROR_STOP=1 -q -c "
+  insert into volunteers (id, full_name, community, nfc_uid) values
+   ('b0000000-0000-0000-0000-000000000008','Ocho','x','a1:b2-c3 d4'),
+   ('b0000000-0000-0000-0000-000000000010','Diez','x','A1B2C3D4E5'),
+   ('b0000000-0000-0000-0000-000000000014','Catorce','x','04A1B2C3D4E5F6');"
+BF_OUT="$(mktemp)"
+"$PSQL" -d "$BFDB" -v ON_ERROR_STOP=1   -f "$SCRIPT_DIR/00b_set_test_secret.sql" -f "$SUPABASE_DIR/002_nfc_security.sql" >"$BF_OUT" 2>&1
+BF_RC=$?
+BF_CARDS="$("$PSQL" -d "$BFDB" -At -c "select string_agg(volunteer_id::text, ',' order by volunteer_id) from cards")"
+if [ "$BF_RC" -eq 0 ]    && grep -q "b0000000-0000-0000-0000-000000000010" "$BF_OUT" && grep -q "NOTICE:  backfill" "$BF_OUT"    && [ "$BF_CARDS" = "b0000000-0000-0000-0000-000000000008,b0000000-0000-0000-0000-000000000014" ]; then
+  echo "PASS - backfill omite el UID de 10 hex (NOTICE con volunteer_id), no falla, y crea las de 8 y 14"
+  BF_STATUS=0
+else
+  echo "FAIL - backfill con UID de longitud invalida (rc=$BF_RC cards=$BF_CARDS)"
+  cat "$BF_OUT"
+  BF_STATUS=1
+fi
+rm -f "$BF_OUT"
+"$PSQL" -d postgres -c "drop database if exists \"$BFDB\";" >/dev/null 2>&1
+
+echo
 echo "== [3/3] Resultado =="
-if [ "$MAIN_STATUS" -eq 0 ] && [ "$GUARD_STATUS" -eq 0 ]; then
+if [ "$MAIN_STATUS" -eq 0 ] && [ "$GUARD_STATUS" -eq 0 ] && [ "${BF_STATUS:-0}" -eq 0 ]; then
   echo "TODO PASS"
   exit 0
 else
-  echo "HAY FALLAS (ver arriba). main_status=$MAIN_STATUS guard_status=$GUARD_STATUS"
+  echo "HAY FALLAS (ver arriba). main_status=$MAIN_STATUS guard_status=$GUARD_STATUS bf_status=${BF_STATUS:-0}"
   exit 1
 fi

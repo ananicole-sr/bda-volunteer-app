@@ -171,18 +171,33 @@ begin
   end if;
 end $$;
 
-insert into cards (volunteer_id, uid_hmac, status, issued_at)
-select
-  v.id,
-  encode(
-    extensions.hmac(upper(v.nfc_uid), current_setting('app.card_hmac_secret'), 'sha256'),
-    'hex'
-  ),
-  'active',
-  now()
-from volunteers v
-where v.nfc_uid is not null
-on conflict (uid_hmac) do nothing;
+-- Normaliza igual que el contrato (docs/nfc-contract.md): quita separadores
+-- " :-_.", MAYUSCULAS, y solo admite 8, 14 o 20 hex. Los que no cumplan NO
+-- generan tarjeta (se omiten con NOTICE; el voluntario queda sin tarjeta y
+-- hay que emitirle una con issue_card).
+do $$
+declare
+  r        record;
+  v_uid    text;
+begin
+  for r in select id, nfc_uid from volunteers where nfc_uid is not null loop
+    v_uid := upper(regexp_replace(r.nfc_uid, '[ :._-]', '', 'g'));
+    if length(v_uid) not in (8, 14, 20) or v_uid !~ '^[0-9A-F]+$' then
+      raise notice 'backfill: nfc_uid con formato no admitido (longitud % o no hex), se omite la tarjeta del volunteer_id %',
+        length(v_uid), r.id;
+      continue;
+    end if;
+
+    insert into cards (volunteer_id, uid_hmac, status, issued_at)
+    values (
+      r.id,
+      encode(extensions.hmac(v_uid, current_setting('app.card_hmac_secret'), 'sha256'), 'hex'),
+      'active',
+      now()
+    )
+    on conflict (uid_hmac) do nothing;
+  end loop;
+end $$;
 
 alter table volunteers drop column if exists nfc_uid;
 
