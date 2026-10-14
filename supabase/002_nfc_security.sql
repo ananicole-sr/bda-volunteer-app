@@ -218,6 +218,37 @@ as $$ select 1; $$;
 
 comment on function nfc_daily_checkin_limit() is 'Maximo de check-ins validos por voluntario por dia calendario (America/Mexico_City). Cambiar aqui, no en register_check_in.';
 
+-- Resultado de un event_id ya procesado (lo usa register_check_in en el
+-- chequeo inicial, tras tomar el lock del voluntario y al capturar un
+-- unique_violation). Interno: nadie salvo el propietario/definer lo ejecuta.
+create or replace function nfc_duplicate_event_result(p_event_id uuid)
+returns jsonb
+language plpgsql
+stable
+security definer
+set search_path = public, pg_temp
+as $$
+declare
+  v_ci check_ins%rowtype;
+  v_v  volunteers%rowtype;
+begin
+  select * into v_ci from check_ins where event_id = p_event_id;
+  select * into v_v from volunteers where id = v_ci.volunteer_id;
+  return jsonb_build_object(
+    'code', 'duplicate_event',
+    'points_awarded', v_ci.points_awarded,
+    'volunteer', jsonb_build_object(
+      'id', v_v.id,
+      'full_name', v_v.full_name,
+      'points', v_v.points,
+      'total_visits', v_v.total_visits
+    )
+  );
+end;
+$$;
+
+revoke all on function nfc_duplicate_event_result(uuid) from public, anon, authenticated;
+
 -- register_check_in: idempotente por event_id; valida tarjeta/voluntario/
 -- frescura/tope diario; si todo pasa, inserta en check_ins y deja que el
 -- trigger fn_apply_checkin (ya existente en schema.sql) calcule puntos y
@@ -235,7 +266,8 @@ security definer
 set search_path = public, pg_temp
 as $$
 declare
-  v_existing      check_ins%rowtype;
+  v_constraint    text;
+  v_vol_found     boolean;
   v_card          cards%rowtype;
   v_volunteer     volunteers%rowtype;
   v_today_count   integer;
@@ -245,19 +277,8 @@ declare
 begin
   -- 1) Idempotencia por event_id: si ya se proceso, regresa el resultado
   --    original. Nunca vuelve a insertar ni a otorgar puntos dos veces.
-  select * into v_existing from check_ins where event_id = p_event_id;
-  if found then
-    select * into v_volunteer from volunteers where id = v_existing.volunteer_id;
-    return jsonb_build_object(
-      'code', 'duplicate_event',
-      'points_awarded', v_existing.points_awarded,
-      'volunteer', jsonb_build_object(
-        'id', v_volunteer.id,
-        'full_name', v_volunteer.full_name,
-        'points', v_volunteer.points,
-        'total_visits', v_volunteer.total_visits
-      )
-    );
+  if exists (select 1 from check_ins where event_id = p_event_id) then
+    return nfc_duplicate_event_result(p_event_id);
   end if;
 
   -- 2) Frescura del evento (hora que reporta el cliente/terminal, no now()).
@@ -287,8 +308,17 @@ begin
   end if;
 
   -- 4) Voluntario activo.
-  select * into v_volunteer from volunteers where id = v_card.volunteer_id;
-  if not found or not v_volunteer.is_active then
+  --    FOR UPDATE serializa los check-ins concurrentes del mismo voluntario:
+  --    el tope diario (paso 5) se cuenta ya con el lock tomado, asi que dos
+  --    solicitudes simultaneas no pueden pasar ambas bajo el tope. Tras
+  --    esperar el lock se revisa de nuevo el event_id: si la otra sesion
+  --    proceso ese mismo evento, es duplicate_event y no daily_limit.
+  select * into v_volunteer from volunteers where id = v_card.volunteer_id for update;
+  v_vol_found := found;
+  if exists (select 1 from check_ins where event_id = p_event_id) then
+    return nfc_duplicate_event_result(p_event_id);
+  end if;
+  if not v_vol_found or not v_volunteer.is_active then
     insert into audit_logs (event_type, volunteer_id, terminal_id, detail)
     values ('checkin_volunteer_inactive', v_card.volunteer_id, p_terminal_id, jsonb_build_object('event_id', p_event_id));
     return jsonb_build_object('code', 'volunteer_inactive', 'message', 'Voluntario inactivo');
@@ -324,12 +354,23 @@ begin
 
   -- 6) Insertar. El trigger fn_apply_checkin calcula points_awarded,
   --    visit_number y actualiza volunteers.points/total_visits/last_check_in_at.
-  insert into check_ins (
-    volunteer_id, terminal_id, status, event_id, operator_id, client_ts, checked_in_at
-  ) values (
-    v_volunteer.id, p_terminal_id, 'valid', p_event_id, p_operator_id, p_client_ts, p_client_ts
-  )
-  returning id, points_awarded, visit_number into v_new_id, v_points, v_visit_number;
+  begin
+    insert into check_ins (
+      volunteer_id, terminal_id, status, event_id, operator_id, client_ts, checked_in_at
+    ) values (
+      v_volunteer.id, p_terminal_id, 'valid', p_event_id, p_operator_id, p_client_ts, p_client_ts
+    )
+    returning id, points_awarded, visit_number into v_new_id, v_points, v_visit_number;
+  exception when unique_violation then
+    -- Mismo event_id insertado por otra sesion (p.ej. otro voluntario/tarjeta
+    -- en carrera): el sub-bloque revierte el trigger y se devuelve el
+    -- resultado original. Cualquier otra unique_violation se propaga.
+    get stacked diagnostics v_constraint = constraint_name;
+    if v_constraint = 'check_ins_event_id_key' then
+      return nfc_duplicate_event_result(p_event_id);
+    end if;
+    raise;
+  end;
 
   select * into v_volunteer from volunteers where id = v_volunteer.id;
 

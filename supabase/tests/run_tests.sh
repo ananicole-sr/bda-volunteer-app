@@ -55,6 +55,60 @@ prepare_db "$TESTDB"
 MAIN_STATUS=$?
 
 echo
+echo "== [1b] Concurrencia: dos sesiones psql sobre el mismo voluntario =="
+# Sesion A abre una transaccion, hace el check-in y se queda 3 s con el lock
+# antes de COMMIT; la sesion B arranca 1 s despues (mientras A sigue abierta).
+# Sin FOR UPDATE en register_check_in, B no veria el insert de A y ambos
+# darian 'ok'.
+CONC_SETUP="
+  set app.card_hmac_secret = 'test-only-secret-do-not-use-in-prod';
+  insert into volunteers (id, full_name, community) values
+    ('c0000000-0000-0000-0000-000000000001','Conc daily','x'),
+    ('c0000000-0000-0000-0000-000000000002','Conc event','x');
+  insert into cards (volunteer_id, uid_hmac) values
+    ('c0000000-0000-0000-0000-000000000001', encode(extensions.hmac('CC000001', current_setting('app.card_hmac_secret'), 'sha256'), 'hex')),
+    ('c0000000-0000-0000-0000-000000000002', encode(extensions.hmac('CC000002', current_setting('app.card_hmac_secret'), 'sha256'), 'hex'));"
+"$PSQL" -d "$TESTDB" -v ON_ERROR_STOP=1 -q -c "$CONC_SETUP" || fail_setup "setup de concurrencia"
+
+conc_call() { # $1 event_id  $2 uid  $3 sleep-after (segundos)
+  "$PSQL" -d "$TESTDB" -At -v ON_ERROR_STOP=1 2>&1 <<SQL | grep -vE '^$|^SET$|^BEGIN$|^COMMIT$|^[0-9]+$'
+set app.card_hmac_secret = 'test-only-secret-do-not-use-in-prod';
+select encode(extensions.hmac('$2', current_setting('app.card_hmac_secret'), 'sha256'), 'hex') as h \gset
+begin;
+set local role service_role;
+select register_check_in('$1', :'h', 'term-conc', null, now())->>'code';
+select pg_sleep($3);
+commit;
+SQL
+}
+conc_pair() { # $1 evA  $2 evB  $3 uid -> imprime "codigoA codigoB"
+  local fa fb
+  fa="$(mktemp)"; fb="$(mktemp)"
+  conc_call "$1" "$3" 3 >"$fa" & local pa=$!
+  sleep 1
+  conc_call "$2" "$3" 0 >"$fb" & local pb=$!
+  wait $pa $pb
+  echo "$(tr '
+' ',' <"$fa")|$(tr '
+' ',' <"$fb")"
+  rm -f "$fa" "$fb"
+}
+
+CONC_STATUS=0
+R1="$(conc_pair 'c1000000-0000-0000-0000-00000000000a' 'c1000000-0000-0000-0000-00000000000b' 'CC000001')"
+if [ "$R1" = "ok,|daily_limit," ]; then
+  echo "PASS - 2 check-ins simultaneos (event_id distintos) -> exactamente un ok y un daily_limit"
+else
+  echo "FAIL - concurrencia daily_limit: $R1 (esperado 'ok,|daily_limit,')"; CONC_STATUS=1
+fi
+R2="$(conc_pair 'c2000000-0000-0000-0000-00000000000a' 'c2000000-0000-0000-0000-00000000000a' 'CC000002')"
+if [ "$R2" = "ok,|duplicate_event," ]; then
+  echo "PASS - mismo event_id en paralelo -> ok + duplicate_event, sin error"
+else
+  echo "FAIL - concurrencia mismo event_id: $R2 (esperado 'ok,|duplicate_event,')"; CONC_STATUS=1
+fi
+
+echo
 echo "== [2/3] Base aparte: el backfill debe abortar sin app.card_hmac_secret =="
 prepare_db "$GUARDDB"
 "$PSQL" -d "$GUARDDB" -v ON_ERROR_STOP=1 \
@@ -108,10 +162,10 @@ rm -f "$BF_OUT"
 
 echo
 echo "== [3/3] Resultado =="
-if [ "$MAIN_STATUS" -eq 0 ] && [ "$GUARD_STATUS" -eq 0 ] && [ "${BF_STATUS:-0}" -eq 0 ]; then
+if [ "$MAIN_STATUS" -eq 0 ] && [ "$GUARD_STATUS" -eq 0 ] && [ "${BF_STATUS:-0}" -eq 0 ] && [ "${CONC_STATUS:-0}" -eq 0 ]; then
   echo "TODO PASS"
   exit 0
 else
-  echo "HAY FALLAS (ver arriba). main_status=$MAIN_STATUS guard_status=$GUARD_STATUS bf_status=${BF_STATUS:-0}"
+  echo "HAY FALLAS (ver arriba). main_status=$MAIN_STATUS guard_status=$GUARD_STATUS bf_status=${BF_STATUS:-0} conc_status=${CONC_STATUS:-0}"
   exit 1
 fi
