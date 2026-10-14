@@ -294,6 +294,20 @@ begin
     return jsonb_build_object('code', 'volunteer_inactive', 'message', 'Voluntario inactivo');
   end if;
 
+  -- 4b) Deriva de reloj: si la hora del cliente difiere de la del servidor
+  --     mas de 10 minutos se deja rastro en audit_logs, pero NO se rechaza
+  --     (el rechazo por antiguedad/futuro ya lo hace el paso 2).
+  if abs(extract(epoch from (p_client_ts - now()))) > 600 then
+    insert into audit_logs (event_type, volunteer_id, terminal_id, detail)
+    values (
+      'clock_drift', v_volunteer.id, p_terminal_id,
+      jsonb_build_object(
+        'event_id', p_event_id,
+        'drift_seconds', round(extract(epoch from (p_client_ts - now())))
+      )
+    );
+  end if;
+
   -- 5) Tope diario (dia calendario America/Mexico_City, segun el contrato).
   select count(*) into v_today_count
   from check_ins

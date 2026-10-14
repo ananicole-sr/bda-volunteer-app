@@ -631,6 +631,50 @@ end;
 $$;
 
 
+-- ----------------------------------------------------------------------------
+-- Caso 15: clock_drift (|client_ts - now()| > 10 min) se audita sin rechazar
+-- ----------------------------------------------------------------------------
+do $$
+declare
+  v_vol   uuid;
+  v_hmac  text := encode(extensions.hmac('AAAA0015', current_setting('app.card_hmac_secret'), 'sha256'), 'hex');
+  v_ev1   uuid := gen_random_uuid();
+  v_ev2   uuid := gen_random_uuid();
+  v_vol2  uuid;
+  v_hmac2 text := encode(extensions.hmac('AAAA0016', current_setting('app.card_hmac_secret'), 'sha256'), 'hex');
+  v_r1 jsonb; v_r2 jsonb;
+  v_n1 int; v_n2 int; v_secs numeric;
+begin
+  insert into volunteers (full_name, community) values ('Test Drift', 'x') returning id into v_vol;
+  insert into cards (volunteer_id, uid_hmac, status) values (v_vol, v_hmac, 'active');
+  insert into volunteers (full_name, community) values ('Test NoDrift', 'x') returning id into v_vol2;
+  insert into cards (volunteer_id, uid_hmac, status) values (v_vol2, v_hmac2, 'active');
+
+  set role service_role;
+  v_r1 := register_check_in(v_ev1, v_hmac, 'term-drift', null, now() - interval '30 minutes');
+  v_r2 := register_check_in(v_ev2, v_hmac2, 'term-drift', null, now() - interval '2 minutes');
+  reset role;
+
+  select count(*), max((detail->>'drift_seconds')::numeric) into v_n1, v_secs
+    from audit_logs where event_type = 'clock_drift' and volunteer_id = v_vol
+     and detail->>'event_id' = v_ev1::text and terminal_id = 'term-drift';
+  select count(*) into v_n2 from audit_logs where event_type = 'clock_drift' and volunteer_id = v_vol2;
+
+  insert into test_results (case_name, status, detail) values (
+    'clock_drift > 10 min: check-in ok y fila en audit_logs con drift en segundos',
+    case when v_r1->>'code' = 'ok' and v_n1 = 1 and abs(v_secs + 1800) < 5 then 'PASS' else 'FAIL' end,
+    format('r=%s filas=%s drift=%s', v_r1, v_n1, v_secs));
+  insert into test_results (case_name, status, detail) values (
+    'deriva de 2 min no genera clock_drift',
+    case when v_r2->>'code' = 'ok' and v_n2 = 0 then 'PASS' else 'FAIL' end,
+    format('r=%s filas=%s', v_r2, v_n2));
+exception when others then
+  reset role;
+  insert into test_results (case_name, status, detail) values ('clock_drift', 'FAIL', 'error inesperado: ' || sqlerrm);
+end;
+$$;
+
+
 -- ============================================================================
 -- Reporte final
 -- ============================================================================
