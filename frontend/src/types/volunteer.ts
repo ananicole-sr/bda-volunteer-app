@@ -9,7 +9,6 @@ export interface Volunteer {
 
 export interface VolunteerRow {
   id: string;
-  nfc_uid: string | null;
   full_name: string;
   community: string;
   avatar_url: string | null;

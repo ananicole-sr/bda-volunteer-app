@@ -1,16 +1,7 @@
 import React, { useState } from 'react';
 import { View, TextInput, ScrollView, RefreshControl } from 'react-native';
 import VolunteerRow from './VolunteerRow';
-
-
-interface Volunteer {
-  id: string;
-  name: string;
-  community: string;
-  points: number;
-  lastVisit: string;
-  avatar?: string;
-}
+import type { Volunteer } from '@/types/volunteer';
 
 interface AdminTableProps {
   data: Volunteer[];
