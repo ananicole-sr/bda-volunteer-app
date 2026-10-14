@@ -1,0 +1,245 @@
+// deno test supabase/functions
+import { assert, assertEquals } from "jsr:@std/assert@1";
+import { uidHmac } from "./hmac.ts";
+import { createHandler, type Deps, type RpcResult } from "./handler.ts";
+import { checkInSpec, enrollVolunteerSpec, issueCardSpec } from "./specs.ts";
+import { normalizeUid } from "./uid.ts";
+import { parseCheckIn, parseEnroll, parseIssueCard } from "./validate.ts";
+
+// ---------------------------------------------------------------- UID
+Deno.test("normalizeUid: mayusculas, sin separadores, longitudes 8/14/20", () => {
+  assertEquals(normalizeUid("04:a1:b2:c3"), "04A1B2C3");
+  assertEquals(normalizeUid("04-a1_b2.c3"), "04A1B2C3");
+  assertEquals(normalizeUid(" 04 a1 b2 c3 d4 e5 f6 "), "04A1B2C3D4E5F6");
+  assertEquals(normalizeUid("04A1B2C3D4E5F6A7B8C9"), "04A1B2C3D4E5F6A7B8C9");
+});
+
+Deno.test("normalizeUid: rechaza lo invalido", () => {
+  for (const bad of ["", "04A1B2", "04A1B2C3D4", "04A1B2C3D", "ZZZZZZZZ", "04A1B2C3D4E5F6A7B8C9D0", null, 12345678, undefined, {}]) {
+    assertEquals(normalizeUid(bad), null, `deberia rechazar ${JSON.stringify(bad)}`);
+  }
+});
+
+// ---------------------------------------------------------------- HMAC
+// Vectores calculados en SQL con el mismo mensaje/clave:
+//   select encode(extensions.hmac(upper('<uid>'), 'vector-secret-123', 'sha256'), 'hex');
+Deno.test("uidHmac: vectores identicos a extensions.hmac de Postgres", async () => {
+  assertEquals(
+    await uidHmac("04A1B2C3", "vector-secret-123"),
+    "f16abcbfdaec29b865bb65db3e1ada740e772a94e835f378dfb1766584cf90d0",
+  );
+  assertEquals(
+    await uidHmac("04A1B2C3D4E5F6", "vector-secret-123"),
+    "d17a31012ec627fc9cf2e13cbba33c64645e04211d76b75edf1ddae429b173e0",
+  );
+});
+
+Deno.test("uidHmac: el mensaje se usa en mayusculas", async () => {
+  assertEquals(await uidHmac("04a1b2c3", "s"), await uidHmac("04A1B2C3", "s"));
+});
+
+// ---------------------------------------------------------------- validacion de cuerpos
+const EV = "3f2b8c1e-5a4d-4e6f-8a9b-0c1d2e3f4a5b";
+const okCheckIn = { event_id: EV, uid: "04:a1:b2:c3", terminal_id: "term-1", client_ts: "2026-10-13T12:00:00-06:00" };
+
+Deno.test("parseCheckIn: caso valido normaliza uid y client_ts", () => {
+  const r = parseCheckIn(okCheckIn);
+  assert(r.ok);
+  assertEquals(r.value.uid, "04A1B2C3");
+  assertEquals(r.value.client_ts, "2026-10-13T18:00:00.000Z");
+});
+
+Deno.test("parseCheckIn: rechaza cuerpos invalidos", () => {
+  const cases: unknown[] = [
+    null, [], "x",
+    { ...okCheckIn, event_id: "no-uuid" },
+    { ...okCheckIn, event_id: "3f2b8c1e-5a4d-1e6f-8a9b-0c1d2e3f4a5b" }, // no es v4
+    { ...okCheckIn, uid: "XYZ" },
+    { ...okCheckIn, uid: "04A1B2C3D4" }, // 10 hex
+    { ...okCheckIn, terminal_id: "" },
+    { ...okCheckIn, terminal_id: "x".repeat(65) },
+    { ...okCheckIn, terminal_id: 5 },
+    { ...okCheckIn, client_ts: "ayer" },
+    { ...okCheckIn, client_ts: "2026-10-13T12:00:00" }, // sin zona
+    { ...okCheckIn, client_ts: "2026-13-45T99:00:00Z" },
+    { ...okCheckIn, client_ts: 1760000000 },
+  ];
+  for (const c of cases) assertEquals(parseCheckIn(c).ok, false, JSON.stringify(c));
+  assert(parseCheckIn({ ...okCheckIn, terminal_id: "x".repeat(64) }).ok);
+});
+
+Deno.test("parseEnroll: limites de full_name/community y uid", () => {
+  const good = { full_name: " Ana Perez ", community: "Centro", uid: "04a1b2c3" };
+  const r = parseEnroll(good);
+  assert(r.ok);
+  assertEquals(r.value, { full_name: "Ana Perez", community: "Centro", uid: "04A1B2C3" });
+  assert(parseEnroll({ ...good, full_name: "x".repeat(120) }).ok);
+  for (const bad of [
+    { ...good, full_name: "" }, { ...good, full_name: "   " }, { ...good, full_name: "x".repeat(121) },
+    { ...good, community: "" }, { ...good, community: "x".repeat(121) }, { ...good, community: null },
+    { ...good, uid: "12" }, { full_name: "a", community: "b" },
+  ]) assertEquals(parseEnroll(bad).ok, false, JSON.stringify(bad));
+});
+
+Deno.test("parseIssueCard: volunteer_id UUID y uid valido", () => {
+  const vid = "0a1b2c3d-1111-2222-3333-444455556666";
+  assert(parseIssueCard({ volunteer_id: vid, uid: "04A1B2C3" }).ok);
+  assertEquals(parseIssueCard({ volunteer_id: "123", uid: "04A1B2C3" }).ok, false);
+  assertEquals(parseIssueCard({ volunteer_id: vid, uid: "04A1B2" }).ok, false);
+});
+
+// ---------------------------------------------------------------- handler (cliente simulado)
+interface Fake {
+  deps: Deps;
+  calls: { fn: string; args: Record<string, unknown> }[];
+}
+
+function fake(opts: { user?: string | null; role?: string | null; rpc?: RpcResult; secret?: string | undefined; roleThrows?: boolean } = {}): Fake {
+  const calls: Fake["calls"] = [];
+  const has = (k: string) => k in opts;
+  return {
+    calls,
+    deps: {
+      hmacSecret: has("secret") ? opts.secret : "vector-secret-123",
+      verifyToken: (t) => Promise.resolve(t === "good-token" && opts.user !== null ? { id: opts.user ?? "user-1" } : null),
+      getRole: () => {
+        if (opts.roleThrows) return Promise.reject(new Error("db down"));
+        return Promise.resolve(has("role") ? opts.role ?? null : "admin");
+      },
+      rpc: (fn, args) => {
+        calls.push({ fn, args });
+        return Promise.resolve(opts.rpc ?? { data: { code: "ok" }, error: null });
+      },
+    },
+  };
+}
+
+function req(body: unknown, token: string | null = "good-token", method = "POST"): Request {
+  const headers = new Headers({ "Content-Type": "application/json" });
+  if (token) headers.set("Authorization", `Bearer ${token}`);
+  return new Request("http://localhost/fn", { method, headers, body: method === "GET" ? undefined : typeof body === "string" ? body : JSON.stringify(body) });
+}
+
+Deno.test("401 sin Authorization o con token invalido", async () => {
+  const f = fake();
+  const h = createHandler(checkInSpec, f.deps);
+  for (const r of [req(okCheckIn, null), req(okCheckIn, "bad-token")]) {
+    const res = await h(r);
+    assertEquals(res.status, 401);
+    assertEquals(await res.json(), { code: "unauthorized" });
+  }
+  assertEquals(f.calls.length, 0);
+});
+
+Deno.test("403 sin fila en profiles o con rol incorrecto", async () => {
+  const noProfile = createHandler(checkInSpec, fake({ role: null }).deps);
+  assertEquals((await noProfile(req(okCheckIn))).status, 403);
+
+  for (const role of ["volunteer", "guard"]) {
+    const f = fake({ role });
+    const res = await createHandler(enrollVolunteerSpec, f.deps)(req({ full_name: "A", community: "B", uid: "04A1B2C3" }));
+    assertEquals(res.status, 403);
+    assertEquals(await res.json(), { code: "forbidden" });
+    const res2 = await createHandler(issueCardSpec, f.deps)(req({ volunteer_id: "0a1b2c3d-1111-2222-3333-444455556666", uid: "04A1B2C3" }));
+    assertEquals(res2.status, 403);
+    assertEquals(f.calls.length, 0);
+  }
+  assertEquals((await createHandler(checkInSpec, fake({ role: "volunteer" }).deps)(req(okCheckIn))).status, 403);
+});
+
+Deno.test("check-in acepta guard y admin", async () => {
+  for (const role of ["guard", "admin"]) {
+    const res = await createHandler(checkInSpec, fake({ role }).deps)(req(okCheckIn));
+    assertEquals(res.status, 200);
+  }
+});
+
+Deno.test("400 invalid_request con cuerpo invalido o no JSON (despues de auth y rol)", async () => {
+  const f = fake();
+  const h = createHandler(checkInSpec, f.deps);
+  for (const r of [req({ ...okCheckIn, uid: "ZZ" }), req("{no json"), req(okCheckIn, "good-token", "GET")]) {
+    const res = await h(r);
+    assertEquals(res.status, 400);
+    const body = await res.json();
+    assertEquals(body.code, "invalid_request");
+    assertEquals(typeof body.message, "string");
+  }
+  assertEquals(f.calls.length, 0);
+});
+
+Deno.test("200 pasa tal cual el jsonb de negocio, incluidos codigos de error de negocio", async () => {
+  for (const data of [
+    { code: "ok", points_awarded: 10, volunteer: { id: "v", full_name: "A", points: 10, total_visits: 1 } },
+    { code: "duplicate_event", points_awarded: 10 },
+    { code: "daily_limit", message: "Ya se registro un check-in hoy" },
+    { code: "card_unknown", message: "Tarjeta no registrada" },
+  ]) {
+    const res = await createHandler(checkInSpec, fake({ rpc: { data, error: null } }).deps)(req(okCheckIn));
+    assertEquals(res.status, 200);
+    assertEquals(await res.json(), data);
+  }
+});
+
+Deno.test("check-in: RPC con operator_id del JWT (no del body) y HMAC correcto", async () => {
+  const f = fake({ user: "jwt-user" });
+  const res = await createHandler(checkInSpec, f.deps)(req({ ...okCheckIn, operator_id: "hacker", p_operator_id: "hacker" }));
+  assertEquals(res.status, 200);
+  assertEquals(f.calls.length, 1);
+  assertEquals(f.calls[0].fn, "register_check_in");
+  assertEquals(f.calls[0].args, {
+    p_event_id: EV,
+    p_uid_hmac: "f16abcbfdaec29b865bb65db3e1ada740e772a94e835f378dfb1766584cf90d0",
+    p_terminal_id: "term-1",
+    p_operator_id: "jwt-user",
+    p_client_ts: "2026-10-13T18:00:00.000Z",
+  });
+});
+
+Deno.test("enroll-volunteer e issue-card llaman a su RPC con operator_id del JWT", async () => {
+  const f = fake({ user: "admin-1" });
+  await createHandler(enrollVolunteerSpec, f.deps)(req({ full_name: "Ana", community: "Centro", uid: "04A1B2C3D4E5F6", operator_id: "x" }));
+  await createHandler(issueCardSpec, f.deps)(req({ volunteer_id: "0a1b2c3d-1111-2222-3333-444455556666", uid: "04A1B2C3D4E5F6" }));
+  assertEquals(f.calls[0], {
+    fn: "enroll_volunteer",
+    args: { p_full_name: "Ana", p_community: "Centro", p_uid_hmac: "d17a31012ec627fc9cf2e13cbba33c64645e04211d76b75edf1ddae429b173e0", p_operator_id: "admin-1" },
+  });
+  assertEquals(f.calls[1], {
+    fn: "issue_card",
+    args: { p_volunteer_id: "0a1b2c3d-1111-2222-3333-444455556666", p_uid_hmac: "d17a31012ec627fc9cf2e13cbba33c64645e04211d76b75edf1ddae429b173e0", p_operator_id: "admin-1" },
+  });
+});
+
+Deno.test("500 generico: error de RPC, forma inesperada, sin secreto o fallo de profiles; sin filtrar detalles", async () => {
+  const cases: Fake[] = [
+    fake({ rpc: { data: null, error: { code: "42501" } } }),
+    fake({ rpc: { data: { sin: "code" }, error: null } }),
+    fake({ secret: undefined }),
+    fake({ roleThrows: true }),
+  ];
+  const origError = console.error;
+  console.error = () => {};
+  try {
+    for (const f of cases) {
+      const res = await createHandler(checkInSpec, f.deps)(req(okCheckIn));
+      assertEquals(res.status, 500);
+      const text = await res.text();
+      assertEquals(JSON.parse(text), { code: "server_error" });
+      assert(!text.includes("42501") && !text.includes("db down"));
+    }
+  } finally {
+    console.error = origError;
+  }
+});
+
+Deno.test("los logs de error no incluyen UID ni secreto", async () => {
+  const logged: string[] = [];
+  const origError = console.error;
+  console.error = (...a: unknown[]) => logged.push(a.join(" "));
+  try {
+    await createHandler(checkInSpec, fake({ rpc: { data: null, error: { code: "XX000" } } }).deps)(req(okCheckIn));
+  } finally {
+    console.error = origError;
+  }
+  assert(logged.length > 0);
+  for (const l of logged) assert(!/04A1B2C3|vector-secret-123/i.test(l), l);
+});
