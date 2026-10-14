@@ -675,6 +675,25 @@ end;
 $$;
 
 
+-- ----------------------------------------------------------------------------
+-- Caso 16: vectores de HMAC compartidos con las Edge Functions
+-- (supabase/functions/_shared/shared_test.ts usa estos mismos valores)
+-- ----------------------------------------------------------------------------
+do $$
+declare
+  v8  text := encode(extensions.hmac(upper('04a1b2c3'), 'vector-secret-123', 'sha256'), 'hex');
+  v14 text := encode(extensions.hmac(upper('04A1B2C3D4E5F6'), 'vector-secret-123', 'sha256'), 'hex');
+begin
+  insert into test_results (case_name, status, detail) values (
+    'vector HMAC (8 y 14 hex) coincide con el de las Edge Functions',
+    case when v8 = 'f16abcbfdaec29b865bb65db3e1ada740e772a94e835f378dfb1766584cf90d0'
+          and v14 = 'd17a31012ec627fc9cf2e13cbba33c64645e04211d76b75edf1ddae429b173e0'
+         then 'PASS' else 'FAIL' end,
+    format('v8=%s v14=%s', v8, v14));
+end;
+$$;
+
+
 -- ============================================================================
 -- Reporte final
 -- ============================================================================
