@@ -54,3 +54,55 @@ Join our community of developers creating universal apps.
 
 - [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
 - [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+
+## Lectura NFC (`src/lib/nfc`)
+
+El lector real usa `react-native-nfc-manager` (lee `tag.id` con NfcA, sin
+autenticar MIFARE Classic). Usa codigo nativo, así que **Expo Go no sirve**:
+hace falta un *development build*.
+
+### Compilar el development build (Android)
+
+Requisitos: Android SDK/JDK configurados y un telefono con NFC y depuracion USB.
+
+```bash
+cd frontend
+npm install
+npx expo run:android      # genera android/ (no se commitea) y lo instala
+npx expo start --dev-client
+```
+
+Alternativa sin Android SDK local: EAS Build
+(`npx eas build --profile development --platform android`, requiere cuenta de
+Expo y un `eas.json` con un perfil `development` con `developmentClient: true`).
+
+Despues de cambiar `app.json` (plugins/permisos) o dependencias nativas hay que
+volver a compilar el build. `android/` e `ios/` los genera Expo (prebuild);
+no se suben al repo.
+
+### Probar sin tarjeta (lector simulado)
+
+Con `EXPO_PUBLIC_NFC_MOCK=1` (por ejemplo en `.env.local` o al arrancar:
+`EXPO_PUBLIC_NFC_MOCK=1 npx expo start`) `getNfcReader()` devuelve
+`MockNfcReader`, que responde `04A1B2C3` o el UID fijado con `setNextUid()`.
+La variable se inlinea al compilar el bundle: reinicia Metro con `--clear` al
+cambiarla.
+
+Pantalla de prueba solo para desarrollo: `/dev/nfc-test` (no esta enlazada
+desde la navegacion; abrela con la URL del dev client).
+
+### Pruebas
+
+```bash
+npm test             # jest-expo, con la libreria NFC simulada
+npx tsc --noEmit
+```
+
+### Limitaciones
+
+- Solo Android esta verificado. En otras plataformas `readUid()` falla con
+  `unavailable`.
+- **iOS no esta verificado para MIFARE Classic**: iOS (CoreNFC) no expone NfcA ni
+  la lectura de tarjetas MIFARE Classic como Android, y el plugin de la libreria
+  agrega el entitlement NFC de iOS, que exige una cuenta de desarrollador de
+  pago para firmar.
