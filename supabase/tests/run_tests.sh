@@ -2,7 +2,9 @@
 # ============================================================================
 # Corre las pruebas de supabase/002_nfc_security.sql,
 # supabase/003_volunteer_management.sql, supabase/004_rewards_management.sql,
-# supabase/005_volunteer_accounts.sql y supabase/006_redemptions.sql contra un Postgres
+# supabase/005_volunteer_accounts.sql, supabase/006_redemptions.sql,
+# supabase/007_volunteer_registration.sql y supabase/008_fix_issue_card.sql
+# contra un Postgres
 # local (no contra el proyecto de Supabase real).
 #
 # Variables de entorno opcionales:
@@ -57,11 +59,15 @@ prepare_db "$TESTDB"
   -f "$SUPABASE_DIR/004_rewards_management.sql" \
   -f "$SUPABASE_DIR/005_volunteer_accounts.sql" \
   -f "$SUPABASE_DIR/006_redemptions.sql" \
+  -f "$SUPABASE_DIR/007_volunteer_registration.sql" \
+  -f "$SUPABASE_DIR/008_fix_issue_card.sql" \
   -f "$SCRIPT_DIR/10_test_cases.sql" \
   -f "$SCRIPT_DIR/20_volunteer_management_cases.sql" \
   -f "$SCRIPT_DIR/30_rewards_management_cases.sql" \
   -f "$SCRIPT_DIR/40_volunteer_accounts_cases.sql" \
-  -f "$SCRIPT_DIR/50_redemptions_cases.sql"
+  -f "$SCRIPT_DIR/50_redemptions_cases.sql" \
+  -f "$SCRIPT_DIR/60_volunteer_registration_cases.sql" \
+  -f "$SCRIPT_DIR/70_issue_card_cases.sql"
 MAIN_STATUS=$?
 
 echo
@@ -234,6 +240,49 @@ else
 fi
 
 echo
+echo "== [1e] Concurrencia (007): dos altas con la misma tarjeta en paralelo =="
+# Dos solicitudes distintas (emails distintos, misma tarjeta) ya pasaron begin
+# y tienen su cuenta creada; ambas llaman complete a la vez. Solo una puede
+# quedarse la tarjeta: la otra debe responder card_in_use con cleanup.
+REG_SETUP="$("$PSQL" -d "$TESTDB" -At -v ON_ERROR_STOP=1 <<'SQL' | grep -E '^[0-9a-f-]{36}$'
+set app.card_hmac_secret = 'test-only-secret-do-not-use-in-prod';
+select encode(extensions.hmac('CC0000E7', current_setting('app.card_hmac_secret'), 'sha256'), 'hex') as h \gset
+set role service_role;
+select begin_volunteer_registration('e7100000-0000-4000-8000-00000000000a', 'conc007-a@test.local', :'h', 'Conc A', 'x', null)->>'registration_id';
+select begin_volunteer_registration('e7100000-0000-4000-8000-00000000000b', 'conc007-b@test.local', :'h', 'Conc B', 'x', null)->>'registration_id';
+SQL
+)"
+REG_A="$(echo "$REG_SETUP" | sed -n 1p)"; REG_B="$(echo "$REG_SETUP" | sed -n 2p)"
+"$PSQL" -d "$TESTDB" -v ON_ERROR_STOP=1 -q -c "
+  insert into auth.users (id, email, raw_app_meta_data) values
+    ('e7200000-0000-0000-0000-00000000000a', 'conc007-a@test.local', jsonb_build_object('bamx_registration_id', '$REG_A')),
+    ('e7200000-0000-0000-0000-00000000000b', 'conc007-b@test.local', jsonb_build_object('bamx_registration_id', '$REG_B'));" \
+  || fail_setup "setup de concurrencia 007"
+complete_call() { # $1 registration_id  $2 auth_user_id  $3 sleep-after
+  "$PSQL" -d "$TESTDB" -At -v ON_ERROR_STOP=1 2>&1 <<SQL | grep -vE '^$|^SET$|^BEGIN$|^COMMIT$|^[0-9]+$'
+begin;
+set local role service_role;
+select complete_volunteer_registration('$1', '$2', null)->>'code';
+select pg_sleep($3);
+commit;
+SQL
+}
+CA="$(mktemp)"; CB="$(mktemp)"
+complete_call "$REG_A" e7200000-0000-0000-0000-00000000000a 3 >"$CA" & PA=$!
+sleep 1
+complete_call "$REG_B" e7200000-0000-0000-0000-00000000000b 0 >"$CB" & PB=$!
+wait $PA $PB
+R7="$(tr '\n' ',' <"$CA")|$(tr '\n' ',' <"$CB")"
+rm -f "$CA" "$CB"
+V7="$("$PSQL" -d "$TESTDB" -At -c "select count(*) from volunteers where user_id in ('e7200000-0000-0000-0000-00000000000a', 'e7200000-0000-0000-0000-00000000000b')")"
+P7="$("$PSQL" -d "$TESTDB" -At -c "select count(*) from profiles where id = 'e7200000-0000-0000-0000-00000000000b'")"
+if [ "$R7" = "ok,|card_in_use," ] && [ "$V7" = "1" ] && [ "$P7" = "0" ]; then
+  echo "PASS - 2 altas con la misma tarjeta en paralelo -> ok + card_in_use; 1 voluntario, el perdedor sin profile"
+else
+  echo "FAIL - concurrencia alta: $R7 voluntarios=$V7 profile_perdedor=$P7 (esperado 'ok,|card_in_use,', 1, 0)"; CONC_STATUS=1
+fi
+
+echo
 echo "== [2/3] Base aparte: el backfill debe abortar sin app.card_hmac_secret =="
 prepare_db "$GUARDDB"
 "$PSQL" -d "$GUARDDB" -v ON_ERROR_STOP=1 \
@@ -313,11 +362,32 @@ fi
 "$PSQL" -d postgres -c "drop database if exists \"$LGDB\";" >/dev/null 2>&1
 
 echo
+echo "== [2d] issue_card con voluntario inexistente: sin 008 falla, con 008 responde volunteer_not_found =="
+ICDB="${ICDB:-nfc_security_test_issue_card_008}"
+prepare_db "$ICDB"
+"$PSQL" -d "$ICDB" -v ON_ERROR_STOP=1 -q -f "$SCRIPT_DIR/00_fixtures.sql" -f "$SCRIPT_DIR/00b_set_test_secret.sql" \
+  -f "$SUPABASE_DIR/schema.sql" -f "$SUPABASE_DIR/002_nfc_security.sql" \
+  || fail_setup "no se pudo preparar el esquema 002 en $ICDB"
+IC_CALL="set role service_role; select issue_card('00000000-0000-4000-8000-0000000000ff', repeat('a', 64), null)->>'code';"
+IC_BEFORE="$("$PSQL" -d "$ICDB" -At -c "$IC_CALL" 2>&1 | grep -oE 'foreign key|volunteer_not_found' | head -1)"
+"$PSQL" -d "$ICDB" -v ON_ERROR_STOP=1 -q -f "$SUPABASE_DIR/008_fix_issue_card.sql" >/dev/null 2>&1
+IC_RC=$?
+IC_AFTER="$("$PSQL" -d "$ICDB" -At -c "$IC_CALL" 2>&1 | tail -1)"
+if [ "$IC_BEFORE" = "foreign key" ] && [ "$IC_RC" -eq 0 ] && [ "$IC_AFTER" = "volunteer_not_found" ]; then
+  echo "PASS - sin 008: error de foreign key; con 008: volunteer_not_found"
+  IC_STATUS=0
+else
+  echo "FAIL - issue_card antes='$IC_BEFORE' rc=$IC_RC despues='$IC_AFTER'"
+  IC_STATUS=1
+fi
+"$PSQL" -d postgres -c "drop database if exists \"$ICDB\";" >/dev/null 2>&1
+
+echo
 echo "== [3/3] Resultado =="
-if [ "$MAIN_STATUS" -eq 0 ] && [ "$GUARD_STATUS" -eq 0 ] && [ "${BF_STATUS:-0}" -eq 0 ] && [ "${CONC_STATUS:-0}" -eq 0 ] && [ "${LG_STATUS:-0}" -eq 0 ]; then
+if [ "$MAIN_STATUS" -eq 0 ] && [ "$GUARD_STATUS" -eq 0 ] && [ "${BF_STATUS:-0}" -eq 0 ] && [ "${CONC_STATUS:-0}" -eq 0 ] && [ "${LG_STATUS:-0}" -eq 0 ] && [ "${IC_STATUS:-0}" -eq 0 ]; then
   echo "TODO PASS"
   exit 0
 else
-  echo "HAY FALLAS (ver arriba). main_status=$MAIN_STATUS guard_status=$GUARD_STATUS bf_status=${BF_STATUS:-0} conc_status=${CONC_STATUS:-0} legacy_status=${LG_STATUS:-0}"
+  echo "HAY FALLAS (ver arriba). main_status=$MAIN_STATUS guard_status=$GUARD_STATUS bf_status=${BF_STATUS:-0} conc_status=${CONC_STATUS:-0} legacy_status=${LG_STATUS:-0} issue_card_status=${IC_STATUS:-0}"
   exit 1
 fi

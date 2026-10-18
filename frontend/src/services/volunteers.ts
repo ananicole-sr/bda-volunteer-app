@@ -1,8 +1,11 @@
 import { callEdgeFunction } from '@/lib/edgeFunctions';
+import { createRequestId } from '@/lib/requestId';
 import { supabase } from '@/lib/supabase';
 import type {
   DeactivateVolunteerResult,
   LinkVolunteerAccountResult,
+  RegisterVolunteerAccountInput,
+  RegisterVolunteerAccountResult,
   UpdateVolunteerInput,
   UpdateVolunteerResult,
   Volunteer,
@@ -102,5 +105,31 @@ export async function linkVolunteerAccount(
   return callEdgeFunction<LinkVolunteerAccountResult>('link-volunteer-account', {
     volunteer_id: volunteerId,
     user_id: userId,
+  });
+}
+
+export { createRequestId as createRegistrationRequestId };
+
+/**
+ * Alta de voluntario + tarjeta + cuenta de acceso con rol volunteer, ya
+ * vinculada (Edge Function register-volunteer-account, solo admin). El rol lo
+ * asigna el servidor. El admin entrega email y contrasena al voluntario;
+ * cambiarla despues es opcional (services/account.ts).
+ *
+ * Reintentos: usa el MISMO clientRequestId. Si la primera vez se creo la
+ * cuenta pero algo fallo despues, el reintento la reusa (y le deja la
+ * contrasena de este intento) en lugar de crear otra.
+ * No guardes la contrasena en estado persistente ni la registres en logs.
+ */
+export async function registerVolunteerAccount(
+  input: RegisterVolunteerAccountInput
+): Promise<RegisterVolunteerAccountResult> {
+  return callEdgeFunction<RegisterVolunteerAccountResult>('register-volunteer-account', {
+    client_request_id: input.clientRequestId,
+    full_name: input.fullName,
+    community: input.community,
+    uid: input.uid,
+    email: input.email,
+    password: input.password,
   });
 }

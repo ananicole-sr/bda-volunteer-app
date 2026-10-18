@@ -99,3 +99,46 @@ export interface MyRedemption {
   /** null solo si la recompensa dejo de ser visible para el voluntario. */
   reward: { id: string; name: string } | null;
 }
+
+// ---------------------------------------------------------------- alta con cuenta (admin)
+
+/** Datos de register-volunteer-account (docs/nfc-contract.md, funcion 13). */
+export interface RegisterVolunteerAccountInput {
+  /**
+   * UUID v4 de ESTA alta. Generalo con createRegistrationRequestId() al
+   * enviar el formulario y REUSALO si reintentas tras un error de red o 500.
+   */
+  clientRequestId: string;
+  fullName: string;
+  community: string;
+  /** UID leido con getNfcReader().readUid() (el servidor lo vuelve a normalizar). */
+  uid: string;
+  email: string;
+  /** Contrasena inicial (8 a 72 bytes; Supabase Auth puede exigir mas). Nunca se guarda en la app. */
+  password: string;
+}
+
+export type RegisterVolunteerAccountResult =
+  | {
+      code: 'ok';
+      /** true = esta alta ya se habia completado; no se creo nada nuevo. */
+      replayed: boolean;
+      registration_id: string;
+      volunteer: { id: string; full_name: string; community: string; user_id: string };
+      account: { user_id: string; email: string };
+      card_id: string;
+    }
+  | {
+      code:
+        | 'email_in_use'
+        | 'card_in_use'
+        | 'weak_password'
+        | 'invalid_email'
+        | 'account_conflict'
+        | 'idempotency_conflict'
+        | 'registration_not_pending';
+      message?: string;
+      registration_id?: string;
+      /** Solo si se creo y luego se borro (o no se pudo borrar) una cuenta en este intento. */
+      account_cleanup?: 'done' | 'pending';
+    };

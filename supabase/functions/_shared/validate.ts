@@ -335,3 +335,64 @@ export function parseMarkNotificationsRead(body: unknown): Parsed<MarkNotificati
   if ("ok" in ids) return ids;
   return { ok: true, value: { notification_ids: ids.value } };
 }
+
+// ---------------------------------------------------------------- alta con cuenta
+
+/**
+ * Politica minima propia; Supabase Auth aplica ADEMAS la politica que tenga
+ * configurada el proyecto (y la Edge Function devuelve weak_password si la
+ * rechaza). 72 bytes es el maximo que bcrypt toma en cuenta.
+ */
+export const PASSWORD_MIN_LENGTH = 8;
+export const PASSWORD_MAX_BYTES = 72;
+const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+export interface RegisterVolunteerAccountBody {
+  client_request_id: string;
+  full_name: string;
+  community: string;
+  uid: string; // normalizado
+  email: string; // recortado y en minusculas
+  password: string; // tal cual (no se recorta); nunca se registra ni se guarda
+}
+
+export function parseRegisterVolunteerAccount(body: unknown): Parsed<RegisterVolunteerAccountBody> {
+  const b = asRecord(body);
+  if (!b) return fail("el cuerpo debe ser un objeto JSON");
+  if (typeof b.client_request_id !== "string" || !UUID_V4.test(b.client_request_id)) {
+    return fail("client_request_id debe ser un UUID v4");
+  }
+  const full_name = text(b.full_name, "full_name", 120);
+  if ("ok" in full_name) return full_name;
+  const community = text(b.community, "community", 120);
+  if ("ok" in community) return community;
+  const uid = normalizeUid(b.uid);
+  if (uid === null) return fail("uid invalido: hex de 8, 14 o 20 caracteres");
+
+  if (typeof b.email !== "string") return fail("email debe ser texto");
+  const email = b.email.trim().toLowerCase();
+  if (email.length > 254 || !EMAIL.test(email)) return fail("email invalido");
+
+  // Los mensajes nunca incluyen la contrasena.
+  const password = b.password;
+  if (typeof password !== "string") return fail("password debe ser texto");
+  if (password.trim().length === 0) return fail("password no puede estar vacio");
+  if ([...password].length < PASSWORD_MIN_LENGTH) {
+    return fail(`password debe tener al menos ${PASSWORD_MIN_LENGTH} caracteres`);
+  }
+  if (new TextEncoder().encode(password).length > PASSWORD_MAX_BYTES) {
+    return fail(`password excede ${PASSWORD_MAX_BYTES} bytes`);
+  }
+
+  return {
+    ok: true,
+    value: {
+      client_request_id: b.client_request_id.toLowerCase(),
+      full_name: full_name.value,
+      community: community.value,
+      uid,
+      email,
+      password,
+    },
+  };
+}

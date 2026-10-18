@@ -3,6 +3,7 @@
 // Todo lo externo (Auth, tabla profiles, RPC, secreto) entra por `Deps`, de
 // modo que las pruebas lo reemplazan por un cliente simulado.
 
+import { withCors } from "./cors.ts";
 import { uidHmac } from "./hmac.ts";
 import { forbidden, invalidRequest, ok, serverError, unauthorized } from "./http.ts";
 import type { Parsed } from "./validate.ts";
@@ -20,6 +21,8 @@ export interface Deps {
   rpc(fn: string, args: Record<string, unknown>): Promise<RpcResult>;
   /** CARD_UID_HMAC_SECRET */
   hmacSecret: string | undefined;
+  /** CORS_ALLOWED_ORIGINS ya normalizada (ver cors.ts). Sin valor = ningun origen de navegador. */
+  allowedOrigins?: readonly string[];
 }
 
 /** HMAC del UID para cuerpos con tarjeta; null para los que no traen uid. */
@@ -42,29 +45,47 @@ function bearer(req: Request): string | null {
   return m ? m[1] : null;
 }
 
+/**
+ * Pasos comunes 1 y 2: POST, sesion valida y rol permitido (sin fila en
+ * profiles => 403). Devuelve el usuario o la Response de error.
+ */
+export async function authorize(
+  req: Request,
+  deps: Pick<Deps, "verifyToken" | "getRole">,
+  roles: readonly string[],
+): Promise<{ user: { id: string } } | { response: Response }> {
+  if (req.method !== "POST") return { response: invalidRequest("se espera POST") };
+  const token = bearer(req);
+  if (!token) return { response: unauthorized() };
+  const user = await deps.verifyToken(token);
+  if (!user) return { response: unauthorized() };
+  const role = await deps.getRole(user.id);
+  if (!role || !roles.includes(role)) return { response: forbidden() };
+  return { user };
+}
+
+/** Cuerpo JSON de la peticion, o null si no es JSON valido. */
+export async function readJson(req: Request): Promise<{ value: unknown } | null> {
+  try {
+    return { value: await req.json() };
+  } catch {
+    return null;
+  }
+}
+
 export function createHandler<T extends object>(spec: FunctionSpec<T>, deps: Deps) {
-  return async (req: Request): Promise<Response> => {
+  // withCors responde OPTIONS y rechaza orígenes no permitidos ANTES de este flujo.
+  return withCors(async (req: Request): Promise<Response> => {
     try {
-      if (req.method !== "POST") return invalidRequest("se espera POST");
-
-      // 1) Sesion valida
-      const token = bearer(req);
-      if (!token) return unauthorized();
-      const user = await deps.verifyToken(token);
-      if (!user) return unauthorized();
-
-      // 2) Rol (sin fila en profiles => 403)
-      const role = await deps.getRole(user.id);
-      if (!role || !spec.roles.includes(role)) return forbidden();
+      // 1) y 2) Sesion y rol
+      const auth = await authorize(req, deps, spec.roles);
+      if ("response" in auth) return auth.response;
+      const { user } = auth;
 
       // 3) Cuerpo
-      let raw: unknown;
-      try {
-        raw = await req.json();
-      } catch {
-        return invalidRequest("el cuerpo debe ser JSON valido");
-      }
-      const parsed = spec.parse(raw);
+      const raw = await readJson(req);
+      if (!raw) return invalidRequest("el cuerpo debe ser JSON valido");
+      const parsed = spec.parse(raw.value);
       if (!parsed.ok) return invalidRequest(parsed.message);
 
       // 4) HMAC (solo si hay tarjeta de por medio) + RPC
@@ -95,5 +116,5 @@ export function createHandler<T extends object>(spec: FunctionSpec<T>, deps: Dep
       console.error(`[${spec.name}] error inesperado (${e instanceof Error ? e.name : typeof e})`);
       return serverError();
     }
-  };
+  }, deps.allowedOrigins ?? []);
 }
