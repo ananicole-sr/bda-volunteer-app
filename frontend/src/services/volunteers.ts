@@ -1,7 +1,15 @@
+import { callEdgeFunction } from '@/lib/edgeFunctions';
 import { supabase } from '@/lib/supabase';
-import type { Volunteer, VolunteerRow } from '@/types/volunteer';
+import type {
+  DeactivateVolunteerResult,
+  LinkVolunteerAccountResult,
+  UpdateVolunteerInput,
+  UpdateVolunteerResult,
+  Volunteer,
+  VolunteerRow,
+} from '@/types/volunteer';
 
-function formatLastVisit(timestamp: string | null): string {
+export function formatLastVisit(timestamp: string | null): string {
   if (!timestamp) return 'Sin visitas';
 
   const date = new Date(timestamp);
@@ -20,6 +28,7 @@ function mapRowToVolunteer(row: VolunteerRow): Volunteer {
     points: row.points,
     lastVisit: formatLastVisit(row.last_check_in_at),
     avatar: row.avatar_url ?? undefined,
+    isActive: row.is_active,
   };
 }
 
@@ -55,4 +64,43 @@ export async function getVolunteerById(
   }
 
   return mapRowToVolunteer(data as VolunteerRow);
+}
+
+/**
+ * Cambia nombre y/o comunidad (Edge Function update-volunteer, solo admin).
+ * Los campos omitidos no se tocan. Lanza EdgeFunctionError en 400/401/403/500.
+ */
+export async function updateVolunteer(
+  id: string,
+  input: UpdateVolunteerInput
+): Promise<UpdateVolunteerResult> {
+  return callEdgeFunction<UpdateVolunteerResult>('update-volunteer', {
+    volunteer_id: id,
+    ...(input.fullName !== undefined && { full_name: input.fullName }),
+    ...(input.community !== undefined && { community: input.community }),
+  });
+}
+
+/**
+ * Marca al voluntario como inactivo (Edge Function deactivate-volunteer, solo
+ * admin). Idempotente: si ya estaba inactivo responde ok con already_inactive.
+ */
+export async function deactivateVolunteer(id: string): Promise<DeactivateVolunteerResult> {
+  return callEdgeFunction<DeactivateVolunteerResult>('deactivate-volunteer', { volunteer_id: id });
+}
+
+/**
+ * Vincula un voluntario existente a una cuenta de Auth que ya existe y ya
+ * tiene role volunteer (Edge Function link-volunteer-account, solo admin).
+ * userId es el auth.users.id de la cuenta; no se busca por email ni nombre.
+ * Repetir el mismo vinculo responde ok con already_linked = true.
+ */
+export async function linkVolunteerAccount(
+  volunteerId: string,
+  userId: string
+): Promise<LinkVolunteerAccountResult> {
+  return callEdgeFunction<LinkVolunteerAccountResult>('link-volunteer-account', {
+    volunteer_id: volunteerId,
+    user_id: userId,
+  });
 }

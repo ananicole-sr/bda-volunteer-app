@@ -20,5 +20,12 @@ insert into profiles (id, role)
 select id, 'guard' from auth.users where email = 'guard@bamx.test'
 on conflict (id) do update set role = excluded.role;
 
+-- Cuenta de voluntario de prueba (opcional). Crea antes el usuario en Auth;
+-- despues el admin la vincula a su registro con link-volunteer-account
+-- (005_volunteer_accounts.sql). Este archivo solo asigna el rol, no vincula.
+-- insert into profiles (id, role)
+-- select id, 'volunteer' from auth.users where email = 'voluntario@bamx.test'
+-- on conflict (id) do update set role = excluded.role;
+
 -- Verificacion rapida:
 -- select p.id, p.role, u.email from profiles p join auth.users u on u.id = p.id;

@@ -1,4 +1,26 @@
-# Pruebas de `002_nfc_security.sql`
+# Pruebas de las migraciones 002 a 006
+
+`run_tests.sh` aplica 002 a 006 y corre `10_test_cases.sql` (002),
+`20_volunteer_management_cases.sql` (003), `30_rewards_management_cases.sql`
+(004), `40_volunteer_accounts_cases.sql` (005) y `50_redemptions_cases.sql`
+(006); cada archivo imprime su propia tabla y resumen. Secciones extra:
+[1c] misma cuenta vinculada en paralelo; [1d] canjes en paralelo (saldo,
+ultima unidad de stock, mismo request_id); [2c] aplicar 006 sobre canjes
+previos no los marca como pendientes.
+
+Ojo: si `10_test_cases.sql` falla, psql se detiene ahi (ON_ERROR_STOP) y los
+archivos siguientes no corren.
+
+En Linux con PostgreSQL 16 instalado (sin tocar el servicio del sistema), un
+cluster desechable equivalente al de abajo:
+
+```bash
+B=/usr/lib/postgresql/16/bin
+$B/initdb -D /tmp/pgdata-bamx -U postgres -A trust -E UTF8 --locale=C
+$B/pg_ctl -D /tmp/pgdata-bamx -o "-p 5433 -c listen_addresses=127.0.0.1 -c unix_socket_directories=''" -l /tmp/pg-bamx.log start
+PGPORT=5433 bash supabase/tests/run_tests.sh
+$B/pg_ctl -D /tmp/pgdata-bamx stop
+```
 
 Corren contra un Postgres **local**, nunca contra el proyecto de Supabase real.
 

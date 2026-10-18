@@ -2,9 +2,37 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { uidHmac } from "./hmac.ts";
 import { createHandler, type Deps, type RpcResult } from "./handler.ts";
-import { checkInSpec, enrollVolunteerSpec, issueCardSpec } from "./specs.ts";
+import {
+  checkInSpec,
+  createRewardSpec,
+  deactivateRewardSpec,
+  deactivateVolunteerSpec,
+  enrollVolunteerSpec,
+  issueCardSpec,
+  linkVolunteerAccountSpec,
+  markNotificationsReadSpec,
+  markRedemptionDeliveredSpec,
+  redeemRewardsSpec,
+  updateRewardSpec,
+  updateVolunteerSpec,
+} from "./specs.ts";
 import { normalizeUid } from "./uid.ts";
-import { parseCheckIn, parseEnroll, parseIssueCard } from "./validate.ts";
+import {
+  parseCheckIn,
+  parseCreateReward,
+  parseDeactivateReward,
+  parseDeactivateVolunteer,
+  parseEnroll,
+  parseIssueCard,
+  parseLinkVolunteerAccount,
+  parseMarkNotificationsRead,
+  parseMarkRedemptionDelivered,
+  parseRedeemRewards,
+  parseUpdateReward,
+  parseUpdateVolunteer,
+  PG_INT_MAX,
+  REDEMPTION_MAX_ITEMS,
+} from "./validate.ts";
 
 // ---------------------------------------------------------------- UID
 Deno.test("normalizeUid: mayusculas, sin separadores, longitudes 8/14/20", () => {
@@ -242,4 +270,553 @@ Deno.test("los logs de error no incluyen UID ni secreto", async () => {
   }
   assert(logged.length > 0);
   for (const l of logged) assert(!/04A1B2C3|vector-secret-123/i.test(l), l);
+});
+
+// ---------------------------------------------------------------- update-volunteer / deactivate-volunteer
+const VID = "0A1B2C3D-1111-2222-3333-444455556666";
+const vid = VID.toLowerCase();
+
+Deno.test("parseUpdateVolunteer: parcial o completo, recorta y descarta campos ajenos", () => {
+  const onlyName = parseUpdateVolunteer({ volunteer_id: VID, full_name: "  Ana  " });
+  assert(onlyName.ok);
+  assertEquals(onlyName.value, { volunteer_id: vid, full_name: "Ana" });
+
+  const onlyCommunity = parseUpdateVolunteer({ volunteer_id: VID, community: "Centro" });
+  assert(onlyCommunity.ok);
+  assertEquals(onlyCommunity.value, { volunteer_id: vid, community: "Centro" });
+
+  const both = parseUpdateVolunteer({
+    volunteer_id: VID, full_name: "Ana", community: "x".repeat(120),
+    points: 9999, is_active: true, uid: "04A1B2C3", operator_id: "x",
+  });
+  assert(both.ok);
+  assertEquals(both.value, { volunteer_id: vid, full_name: "Ana", community: "x".repeat(120) });
+});
+
+Deno.test("parseUpdateVolunteer: rechaza cuerpos invalidos", () => {
+  for (const bad of [
+    null, [], "x",
+    { volunteer_id: VID },                                 // nada que cambiar
+    { full_name: "Ana" },                                  // sin volunteer_id
+    { volunteer_id: "123", full_name: "Ana" },
+    { volunteer_id: VID, full_name: "" },
+    { volunteer_id: VID, full_name: "   " },
+    { volunteer_id: VID, full_name: "x".repeat(121) },
+    { volunteer_id: VID, full_name: null },                // null no es "no cambiar"
+    { volunteer_id: VID, community: 5 },
+    { volunteer_id: VID, full_name: "Ana", community: "" }, // un campo malo invalida todo
+  ]) assertEquals(parseUpdateVolunteer(bad).ok, false, JSON.stringify(bad));
+});
+
+Deno.test("parseDeactivateVolunteer: solo volunteer_id UUID", () => {
+  const r = parseDeactivateVolunteer({ volunteer_id: VID, is_active: true });
+  assert(r.ok);
+  assertEquals(r.value, { volunteer_id: vid });
+  for (const bad of [null, {}, { volunteer_id: "no-uuid" }, { volunteer_id: 1 }]) {
+    assertEquals(parseDeactivateVolunteer(bad).ok, false, JSON.stringify(bad));
+  }
+});
+
+const volunteerCases = [
+  { spec: updateVolunteerSpec, body: { volunteer_id: VID, full_name: "Ana" } },
+  { spec: deactivateVolunteerSpec, body: { volunteer_id: VID } },
+] as const;
+
+Deno.test("update/deactivate-volunteer: 401 sin token o con token invalido, sin llamar RPC", async () => {
+  for (const { spec, body } of volunteerCases) {
+    const f = fake();
+    const h = createHandler(spec as typeof updateVolunteerSpec, f.deps);
+    for (const r of [req(body, null), req(body, "bad-token")]) {
+      const res = await h(r);
+      assertEquals(res.status, 401, spec.name);
+      assertEquals(await res.json(), { code: "unauthorized" });
+    }
+    assertEquals(f.calls.length, 0);
+  }
+});
+
+Deno.test("update/deactivate-volunteer: 403 para guard, volunteer y sin profile (solo admin)", async () => {
+  for (const { spec, body } of volunteerCases) {
+    for (const role of ["guard", "volunteer", null]) {
+      const f = fake({ role });
+      const res = await createHandler(spec as typeof updateVolunteerSpec, f.deps)(req(body));
+      assertEquals(res.status, 403, `${spec.name} role=${role}`);
+      assertEquals(await res.json(), { code: "forbidden" });
+      assertEquals(f.calls.length, 0);
+    }
+  }
+});
+
+Deno.test("update/deactivate-volunteer: el rol se revisa antes que el cuerpo (403, no 400)", async () => {
+  for (const { spec } of volunteerCases) {
+    const res = await createHandler(spec as typeof updateVolunteerSpec, fake({ role: "guard" }).deps)(req({}));
+    assertEquals(res.status, 403, spec.name);
+  }
+});
+
+Deno.test("update/deactivate-volunteer: 400 invalid_request con cuerpo invalido, sin llamar RPC", async () => {
+  for (const { spec } of volunteerCases) {
+    const f = fake();
+    const h = createHandler(spec as typeof updateVolunteerSpec, f.deps);
+    for (const r of [req({ volunteer_id: "123" }), req("{no json"), req({}, "good-token", "GET")]) {
+      const res = await h(r);
+      assertEquals(res.status, 400, spec.name);
+      assertEquals((await res.json()).code, "invalid_request");
+    }
+    assertEquals(f.calls.length, 0);
+  }
+  const res = await createHandler(updateVolunteerSpec, fake().deps)(req({ volunteer_id: VID }));
+  assertEquals(res.status, 400);
+  assertEquals((await res.json()).message, "se requiere full_name o community");
+});
+
+Deno.test("update-volunteer: RPC con operator_id del JWT, null en lo que no cambia, sin campos ajenos", async () => {
+  const f = fake({ user: "admin-1" });
+  const h = createHandler(updateVolunteerSpec, f.deps);
+  await h(req({ volunteer_id: VID, community: " Centro ", operator_id: "hacker", points: 1, is_active: false }));
+  await h(req({ volunteer_id: VID, full_name: "Ana", community: "Zapopan" }));
+  assertEquals(f.calls, [
+    {
+      fn: "update_volunteer",
+      args: { p_volunteer_id: vid, p_full_name: null, p_community: "Centro", p_operator_id: "admin-1" },
+    },
+    {
+      fn: "update_volunteer",
+      args: { p_volunteer_id: vid, p_full_name: "Ana", p_community: "Zapopan", p_operator_id: "admin-1" },
+    },
+  ]);
+});
+
+Deno.test("deactivate-volunteer: RPC con operator_id del JWT, ignora operator_id del body", async () => {
+  const f = fake({ user: "admin-1" });
+  await createHandler(deactivateVolunteerSpec, f.deps)(req({ volunteer_id: VID, operator_id: "hacker" }));
+  assertEquals(f.calls, [{ fn: "deactivate_volunteer", args: { p_volunteer_id: vid, p_operator_id: "admin-1" } }]);
+});
+
+Deno.test("update/deactivate-volunteer: no requieren CARD_UID_HMAC_SECRET", async () => {
+  for (const { spec, body } of volunteerCases) {
+    const f = fake({ secret: undefined });
+    const res = await createHandler(spec as typeof updateVolunteerSpec, f.deps)(req(body));
+    assertEquals(res.status, 200, spec.name);
+    assertEquals(f.calls.length, 1);
+  }
+});
+
+Deno.test("update/deactivate-volunteer: 200 pasa tal cual ok y volunteer_not_found", async () => {
+  for (const data of [
+    { code: "ok", changed_fields: ["full_name"], volunteer: { id: vid, full_name: "Ana", community: "C", is_active: true } },
+    { code: "ok", already_inactive: true, volunteer: { id: vid, full_name: "Ana", is_active: false } },
+    { code: "volunteer_not_found", message: "El voluntario no existe" },
+  ]) {
+    for (const { spec, body } of volunteerCases) {
+      const res = await createHandler(spec as typeof updateVolunteerSpec, fake({ rpc: { data, error: null } }).deps)(req(body));
+      assertEquals(res.status, 200);
+      assertEquals(await res.json(), data);
+    }
+  }
+});
+
+Deno.test("update/deactivate-volunteer: 500 generico ante error de RPC o forma inesperada", async () => {
+  const origError = console.error;
+  console.error = () => {};
+  try {
+    for (const rpc of [{ data: null, error: { code: "22023" } }, { data: "x", error: null }]) {
+      for (const { spec, body } of volunteerCases) {
+        const res = await createHandler(spec as typeof updateVolunteerSpec, fake({ rpc }).deps)(req(body));
+        assertEquals(res.status, 500);
+        assertEquals(await res.json(), { code: "server_error" });
+      }
+    }
+  } finally {
+    console.error = origError;
+  }
+});
+
+// ---------------------------------------------------------------- create/update/deactivate-reward
+const RID = "5D3E2A10-AAAA-4BBB-8CCC-0123456789AB";
+const rid = RID.toLowerCase();
+const okCreate = { name: " Playera BAMX ", description: " Talla M ", points_cost: 500, stock: 40 };
+
+/** Valores que nunca son un entero >= 0 de Postgres. */
+const BAD_INTS: unknown[] = [-1, 1.5, "10", null, true, [], {}, PG_INT_MAX + 1, 1e20, Number.MAX_SAFE_INTEGER + 2];
+
+Deno.test("parseCreateReward: valido recorta, description opcional/vacia -> null, limites", () => {
+  const r = parseCreateReward(okCreate);
+  assert(r.ok);
+  assertEquals(r.value, { name: "Playera BAMX", description: "Talla M", points_cost: 500, stock: 40 });
+
+  for (const description of [undefined, null, "", "   "]) {
+    const d = parseCreateReward({ ...okCreate, description });
+    assert(d.ok, JSON.stringify(description));
+    assertEquals(d.value.description, null);
+  }
+
+  const edges = parseCreateReward({ name: "n".repeat(120), description: "d".repeat(500), points_cost: 0, stock: PG_INT_MAX });
+  assert(edges.ok);
+  assertEquals([edges.value.points_cost, edges.value.stock], [0, PG_INT_MAX]);
+
+  // campos ajenos se descartan
+  const extra = parseCreateReward({ ...okCreate, is_active: false, id: RID, operator_id: "x" });
+  assert(extra.ok);
+  assertEquals(Object.keys(extra.value).sort(), ["description", "name", "points_cost", "stock"]);
+});
+
+Deno.test("parseCreateReward: rechaza name, description y numeros invalidos", () => {
+  const bad: unknown[] = [
+    null, [], "x",
+    { ...okCreate, name: undefined }, { ...okCreate, name: "" }, { ...okCreate, name: "   " },
+    { ...okCreate, name: "n".repeat(121) }, { ...okCreate, name: 5 },
+    { ...okCreate, description: "d".repeat(501) }, { ...okCreate, description: 7 },
+    { ...okCreate, points_cost: undefined }, { ...okCreate, stock: undefined },
+  ];
+  for (const v of BAD_INTS) bad.push({ ...okCreate, points_cost: v }, { ...okCreate, stock: v });
+  for (const b of bad) assertEquals(parseCreateReward(b).ok, false, JSON.stringify(b));
+});
+
+Deno.test("parseUpdateReward: parcial, description null/vacia = borrar, ausente = no cambiar", () => {
+  const stock = parseUpdateReward({ reward_id: RID, stock: 0 });
+  assert(stock.ok);
+  assertEquals(stock.value, { reward_id: rid, stock: 0 });
+
+  for (const description of [null, "", "  "]) {
+    const c = parseUpdateReward({ reward_id: RID, description });
+    assert(c.ok);
+    assertEquals(c.value, { reward_id: rid, description: null });
+  }
+
+  const all = parseUpdateReward({ reward_id: RID, name: " N ", description: " D ", points_cost: PG_INT_MAX, stock: 1, is_active: true });
+  assert(all.ok);
+  assertEquals(all.value, { reward_id: rid, name: "N", description: "D", points_cost: PG_INT_MAX, stock: 1 });
+});
+
+Deno.test("parseUpdateReward: rechaza id invalido, nada que cambiar y valores invalidos", () => {
+  const bad: unknown[] = [
+    null, {},
+    { reward_id: RID },                          // nada que cambiar
+    { reward_id: RID, is_active: false },        // solo campos ajenos
+    { reward_id: "123", stock: 1 }, { stock: 1 },
+    { reward_id: RID, name: "" }, { reward_id: RID, name: null }, { reward_id: RID, name: "n".repeat(121) },
+    { reward_id: RID, description: "d".repeat(501) },
+    { reward_id: RID, name: "ok", stock: -1 },   // un campo malo invalida todo
+  ];
+  for (const v of BAD_INTS) bad.push({ reward_id: RID, points_cost: v }, { reward_id: RID, stock: v });
+  for (const b of bad) assertEquals(parseUpdateReward(b).ok, false, JSON.stringify(b));
+});
+
+Deno.test("parseDeactivateReward: solo reward_id UUID", () => {
+  const r = parseDeactivateReward({ reward_id: RID, is_active: true });
+  assert(r.ok);
+  assertEquals(r.value, { reward_id: rid });
+  for (const b of [null, {}, { reward_id: "x" }, { reward_id: 1 }, { volunteer_id: RID }]) {
+    assertEquals(parseDeactivateReward(b).ok, false, JSON.stringify(b));
+  }
+});
+
+const rewardCases = [
+  { spec: createRewardSpec, body: okCreate },
+  { spec: updateRewardSpec, body: { reward_id: RID, stock: 3 } },
+  { spec: deactivateRewardSpec, body: { reward_id: RID } },
+] as const;
+type AnySpec = typeof createRewardSpec;
+
+Deno.test("rewards: 401 sin token o con token invalido, sin llamar RPC", async () => {
+  for (const { spec, body } of rewardCases) {
+    const f = fake();
+    const h = createHandler(spec as unknown as AnySpec, f.deps);
+    for (const r of [req(body, null), req(body, "bad-token")]) {
+      const res = await h(r);
+      assertEquals(res.status, 401, spec.name);
+      assertEquals(await res.json(), { code: "unauthorized" });
+    }
+    assertEquals(f.calls.length, 0);
+  }
+});
+
+Deno.test("rewards: 403 para guard, volunteer, rol desconocido y sin profile (solo admin)", async () => {
+  for (const { spec, body } of rewardCases) {
+    for (const role of ["guard", "volunteer", "superadmin", null]) {
+      const f = fake({ role });
+      const res = await createHandler(spec as unknown as AnySpec, f.deps)(req(body));
+      assertEquals(res.status, 403, `${spec.name} role=${role}`);
+      assertEquals(await res.json(), { code: "forbidden" });
+      assertEquals(f.calls.length, 0);
+    }
+    // el rol se revisa antes que el cuerpo: un guard con cuerpo invalido recibe 403, no 400
+    assertEquals((await createHandler(spec as unknown as AnySpec, fake({ role: "guard" }).deps)(req({}))).status, 403);
+  }
+});
+
+Deno.test("rewards: 400 invalid_request con cuerpo invalido, sin llamar RPC", async () => {
+  const invalid: Record<string, unknown[]> = {
+    "create-reward": [{ ...okCreate, points_cost: -1 }, { ...okCreate, stock: 1.5 }, { ...okCreate, name: "" }],
+    "update-reward": [{ reward_id: RID }, { reward_id: RID, points_cost: PG_INT_MAX + 1 }, { reward_id: "x", stock: 1 }],
+    "deactivate-reward": [{}, { reward_id: "x" }],
+  };
+  for (const { spec } of rewardCases) {
+    const f = fake();
+    const h = createHandler(spec as unknown as AnySpec, f.deps);
+    for (const r of [...invalid[spec.name].map((b) => req(b)), req("{no json"), req({}, "good-token", "GET")]) {
+      const res = await h(r);
+      assertEquals(res.status, 400, spec.name);
+      const body = await res.json();
+      assertEquals(body.code, "invalid_request");
+      assertEquals(typeof body.message, "string");
+    }
+    assertEquals(f.calls.length, 0);
+  }
+});
+
+Deno.test("create-reward: RPC con valores normalizados y operator_id del JWT", async () => {
+  const f = fake({ user: "admin-1", secret: undefined }); // no necesita CARD_UID_HMAC_SECRET
+  const res = await createHandler(createRewardSpec, f.deps)(req({ ...okCreate, operator_id: "hacker", is_active: false }));
+  assertEquals(res.status, 200);
+  assertEquals(f.calls, [{
+    fn: "create_reward",
+    args: { p_name: "Playera BAMX", p_description: "Talla M", p_points_cost: 500, p_stock: 40, p_operator_id: "admin-1" },
+  }]);
+});
+
+Deno.test("update-reward: null en lo que no cambia y p_clear_description solo con description null/vacia", async () => {
+  const f = fake({ user: "admin-1" });
+  const h = createHandler(updateRewardSpec, f.deps);
+  await h(req({ reward_id: RID, stock: 0 }));
+  await h(req({ reward_id: RID, description: "" }));
+  await h(req({ reward_id: RID, name: "N", description: "D", points_cost: 1, stock: 2, operator_id: "hacker" }));
+  const base = { p_reward_id: rid, p_operator_id: "admin-1" };
+  assertEquals(f.calls.map((c) => c.args), [
+    { ...base, p_name: null, p_description: null, p_clear_description: false, p_points_cost: null, p_stock: 0 },
+    { ...base, p_name: null, p_description: null, p_clear_description: true, p_points_cost: null, p_stock: null },
+    { ...base, p_name: "N", p_description: "D", p_clear_description: false, p_points_cost: 1, p_stock: 2 },
+  ]);
+  assert(f.calls.every((c) => c.fn === "update_reward"));
+});
+
+Deno.test("deactivate-reward: RPC solo con reward_id y operator_id del JWT", async () => {
+  const f = fake({ user: "admin-1" });
+  await createHandler(deactivateRewardSpec, f.deps)(req({ reward_id: RID, operator_id: "hacker" }));
+  assertEquals(f.calls, [{ fn: "deactivate_reward", args: { p_reward_id: rid, p_operator_id: "admin-1" } }]);
+});
+
+Deno.test("rewards: 200 pasa tal cual ok y reward_not_found; 500 generico ante error", async () => {
+  const reward = { id: rid, name: "P", description: null, points_cost: 1, stock: 1, is_active: true, created_at: "2026-10-18T00:00:00Z" };
+  for (const data of [
+    { code: "ok", reward },
+    { code: "ok", changed_fields: ["stock"], reward },
+    { code: "reward_not_found", message: "La recompensa no existe" },
+  ]) {
+    for (const { spec, body } of rewardCases) {
+      const res = await createHandler(spec as unknown as AnySpec, fake({ rpc: { data, error: null } }).deps)(req(body));
+      assertEquals(res.status, 200);
+      assertEquals(await res.json(), data);
+    }
+  }
+  const origError = console.error;
+  console.error = () => {};
+  try {
+    for (const { spec, body } of rewardCases) {
+      const res = await createHandler(spec as unknown as AnySpec, fake({ rpc: { data: null, error: { code: "22023" } } }).deps)(req(body));
+      assertEquals([res.status, await res.json()], [500, { code: "server_error" }]);
+    }
+  } finally {
+    console.error = origError;
+  }
+});
+
+// ---------------------------------------------------------------- link-volunteer-account
+const LINK_VID = "f2000000-0000-0000-0000-00000000000A";
+const LINK_UID = "F1000000-0000-0000-0000-00000000000A";
+const okLink = { volunteer_id: LINK_VID, user_id: LINK_UID };
+
+Deno.test("parseLinkVolunteerAccount: dos UUID en minusculas, descarta lo demas", () => {
+  const r = parseLinkVolunteerAccount({ ...okLink, email: "a@b.c", full_name: "Ana", role: "volunteer" });
+  assert(r.ok);
+  assertEquals(r.value, { volunteer_id: LINK_VID.toLowerCase(), user_id: LINK_UID.toLowerCase() });
+});
+
+Deno.test("parseLinkVolunteerAccount: rechaza ids faltantes o invalidos (no busca por email/nombre)", () => {
+  for (const bad of [
+    null, [], {}, { volunteer_id: LINK_VID }, { user_id: LINK_UID },
+    { ...okLink, user_id: "a@b.c" }, { ...okLink, volunteer_id: "Ana" },
+    { ...okLink, user_id: null }, { ...okLink, user_id: 5 },
+    { volunteer_id: LINK_VID, email: "vol-a@test.local" },
+  ]) assertEquals(parseLinkVolunteerAccount(bad).ok, false, JSON.stringify(bad));
+});
+
+Deno.test("link-volunteer-account: 401 sin sesion, 403 si no es admin (antes de validar el cuerpo)", async () => {
+  for (const r of [req(okLink, null), req(okLink, "bad-token")]) {
+    const f = fake();
+    const res = await createHandler(linkVolunteerAccountSpec, f.deps)(r);
+    assertEquals([res.status, await res.json()], [401, { code: "unauthorized" }]);
+    assertEquals(f.calls.length, 0);
+  }
+  for (const role of ["guard", "volunteer", null]) {
+    for (const body of [okLink, {}]) {
+      const f = fake({ role });
+      const res = await createHandler(linkVolunteerAccountSpec, f.deps)(req(body));
+      assertEquals([res.status, await res.json()], [403, { code: "forbidden" }], `role=${role}`);
+      assertEquals(f.calls.length, 0);
+    }
+  }
+});
+
+Deno.test("link-volunteer-account: 400 con cuerpo invalido, sin llamar RPC", async () => {
+  const f = fake();
+  const h = createHandler(linkVolunteerAccountSpec, f.deps);
+  for (const r of [req({ volunteer_id: LINK_VID }), req({ ...okLink, user_id: "x" }), req("{no json"), req({}, "good-token", "GET")]) {
+    const res = await h(r);
+    assertEquals(res.status, 400);
+    assertEquals((await res.json()).code, "invalid_request");
+  }
+  assertEquals(f.calls.length, 0);
+});
+
+Deno.test("link-volunteer-account: RPC con operator_id del JWT; no requiere CARD_UID_HMAC_SECRET", async () => {
+  const f = fake({ user: "admin-1", secret: undefined });
+  const res = await createHandler(linkVolunteerAccountSpec, f.deps)(req({ ...okLink, operator_id: "hacker" }));
+  assertEquals(res.status, 200);
+  assertEquals(f.calls, [{
+    fn: "link_volunteer_account",
+    args: { p_volunteer_id: LINK_VID.toLowerCase(), p_user_id: LINK_UID.toLowerCase(), p_operator_id: "admin-1" },
+  }]);
+});
+
+Deno.test("link-volunteer-account: 200 pasa tal cual ok y cada rechazo de negocio", async () => {
+  for (const data of [
+    { code: "ok", already_linked: false, volunteer: { id: "v", full_name: "A", user_id: "u" } },
+    { code: "ok", already_linked: true, volunteer: { id: "v", full_name: "A", user_id: "u" } },
+    { code: "volunteer_not_found", message: "El voluntario no existe" },
+    { code: "account_not_found", message: "La cuenta no existe" },
+    { code: "account_not_volunteer", message: "La cuenta no tiene el rol volunteer" },
+    { code: "volunteer_already_linked", message: "El voluntario ya esta vinculado a otra cuenta" },
+    { code: "account_in_use", message: "La cuenta ya esta vinculada a otro voluntario" },
+  ]) {
+    const res = await createHandler(linkVolunteerAccountSpec, fake({ rpc: { data, error: null } }).deps)(req(okLink));
+    assertEquals([res.status, await res.json()], [200, data]);
+  }
+});
+
+// ---------------------------------------------------------------- redeem-rewards / entrega / notificaciones
+const CRID = "D6000000-0000-4000-8000-000000000001"; // UUID v4
+const R1 = "C6000000-0000-0000-0000-000000000100";
+const R2 = "C6000000-0000-0000-0000-000000000200";
+const okRedeem = { client_request_id: CRID, reward_ids: [R1, R2] };
+const uuidN = (n: number) => `00000000-0000-4000-8000-${String(n).padStart(12, "0")}`;
+
+Deno.test("parseRedeemRewards: ids en minusculas, descarta volunteer_id/saldo/costos del cuerpo", () => {
+  const r = parseRedeemRewards({ ...okRedeem, volunteer_id: "x", points: 99999, balance: 1, costs: [0, 0] });
+  assert(r.ok);
+  assertEquals(r.value, { client_request_id: CRID.toLowerCase(), reward_ids: [R1.toLowerCase(), R2.toLowerCase()] });
+  const max = parseRedeemRewards({ client_request_id: CRID, reward_ids: Array.from({ length: REDEMPTION_MAX_ITEMS }, (_, i) => uuidN(i)) });
+  assert(max.ok);
+});
+
+Deno.test("parseRedeemRewards: rechaza seleccion vacia, duplicados, >20, ids invalidos y request id no v4", () => {
+  for (const bad of [
+    null, {}, { reward_ids: [R1] },
+    { ...okRedeem, reward_ids: [] }, { ...okRedeem, reward_ids: R1 }, { ...okRedeem, reward_ids: null },
+    { ...okRedeem, reward_ids: [R1, R1] },
+    { ...okRedeem, reward_ids: [R1, R1.toLowerCase()] },            // duplicado aunque cambie el caso
+    { ...okRedeem, reward_ids: [R1, "x"] }, { ...okRedeem, reward_ids: [R1, null] }, { ...okRedeem, reward_ids: [5] },
+    { ...okRedeem, reward_ids: Array.from({ length: REDEMPTION_MAX_ITEMS + 1 }, (_, i) => uuidN(i)) },
+    { ...okRedeem, client_request_id: "x" },
+    { ...okRedeem, client_request_id: "d6000000-0000-1000-8000-000000000001" }, // v1, no v4
+    { reward_ids: [R1, R2] },
+  ]) assertEquals(parseRedeemRewards(bad).ok, false, JSON.stringify(bad));
+});
+
+Deno.test("parseMarkRedemptionDelivered y parseMarkNotificationsRead", () => {
+  const d = parseMarkRedemptionDelivered({ request_id: CRID, status: "pending_delivery" });
+  assert(d.ok);
+  assertEquals(d.value, { request_id: CRID.toLowerCase() });
+  for (const bad of [null, {}, { request_id: "x" }]) assertEquals(parseMarkRedemptionDelivered(bad).ok, false);
+
+  const ids = parseMarkNotificationsRead({ notification_ids: [R1, R1.toLowerCase(), R2] });
+  assert(ids.ok);
+  assertEquals(ids.value, { notification_ids: [R1.toLowerCase(), R2.toLowerCase()] }); // repetidos se unifican
+  const all = parseMarkNotificationsRead({ all: true });
+  assert(all.ok);
+  assertEquals(all.value, { notification_ids: null });
+  for (const bad of [
+    null, {}, { all: false }, { all: "true" }, { notification_ids: [] }, { notification_ids: ["x"] },
+    { notification_ids: [R1], all: true },
+    { notification_ids: Array.from({ length: 101 }, (_, i) => uuidN(i)) },
+  ]) assertEquals(parseMarkNotificationsRead(bad).ok, false, JSON.stringify(bad));
+});
+
+Deno.test("redeem-rewards: 401 sin sesion; 403 para admin, guard y sin profile (solo volunteer)", async () => {
+  for (const r of [req(okRedeem, null), req(okRedeem, "bad-token")]) {
+    const f = fake({ role: "volunteer" });
+    assertEquals((await createHandler(redeemRewardsSpec, f.deps)(r)).status, 401);
+    assertEquals(f.calls.length, 0);
+  }
+  for (const role of ["admin", "guard", null]) {
+    const f = fake({ role });
+    const res = await createHandler(redeemRewardsSpec, f.deps)(req(okRedeem));
+    assertEquals([res.status, await res.json()], [403, { code: "forbidden" }], `role=${role}`);
+    assertEquals(f.calls.length, 0);
+  }
+});
+
+Deno.test("redeem-rewards: identidad del JWT; el cuerpo no puede elegir voluntario, saldo ni costos", async () => {
+  const f = fake({ user: "vol-user-1", role: "volunteer", secret: undefined });
+  const res = await createHandler(redeemRewardsSpec, f.deps)(req({
+    ...okRedeem, volunteer_id: "otro", p_user_id: "otro", user_id: "otro", points: 1e9, total_points: 0,
+  }));
+  assertEquals(res.status, 200);
+  assertEquals(f.calls, [{
+    fn: "redeem_rewards",
+    args: {
+      p_user_id: "vol-user-1",
+      p_client_request_id: CRID.toLowerCase(),
+      p_reward_ids: [R1.toLowerCase(), R2.toLowerCase()],
+    },
+  }]);
+});
+
+Deno.test("redeem-rewards: 400 con seleccion invalida sin llamar RPC; 200 pasa los codigos de negocio", async () => {
+  const f = fake({ role: "volunteer" });
+  for (const body of [{ ...okRedeem, reward_ids: [] }, { ...okRedeem, reward_ids: [R1, R1] }, { reward_ids: [R1] }]) {
+    const res = await createHandler(redeemRewardsSpec, f.deps)(req(body));
+    assertEquals([res.status, (await res.json()).code], [400, "invalid_request"]);
+  }
+  assertEquals(f.calls.length, 0);
+  for (const data of [
+    { code: "ok", replayed: false, balance: 200, request: { id: "q", status: "pending_delivery", total_points: 300, items: [] } },
+    { code: "ok", replayed: true, balance: 200, request: { id: "q" } },
+    { code: "insufficient_points", required: 600, available: 500 },
+    { code: "reward_unavailable", rewards: [{ reward_id: R1, reason: "out_of_stock" }] },
+    { code: "idempotency_conflict" }, { code: "volunteer_not_linked" }, { code: "volunteer_inactive" },
+  ]) {
+    const res = await createHandler(redeemRewardsSpec, fake({ role: "volunteer", rpc: { data, error: null } }).deps)(req(okRedeem));
+    assertEquals([res.status, await res.json()], [200, data]);
+  }
+});
+
+Deno.test("mark-redemption-delivered y mark-notifications-read: solo admin; ids del JWT", async () => {
+  const cases = [
+    { spec: markRedemptionDeliveredSpec, body: { request_id: CRID } },
+    { spec: markNotificationsReadSpec, body: { all: true } },
+  ] as const;
+  for (const { spec, body } of cases) {
+    for (const role of ["volunteer", "guard", null]) {
+      const f = fake({ role });
+      const res = await createHandler(spec as unknown as typeof markRedemptionDeliveredSpec, f.deps)(req(body));
+      assertEquals(res.status, 403, `${spec.name} role=${role}`);
+      assertEquals(f.calls.length, 0);
+    }
+    assertEquals((await createHandler(spec as unknown as typeof markRedemptionDeliveredSpec, fake().deps)(req(body, null))).status, 401);
+  }
+
+  const f = fake({ user: "admin-1" });
+  await createHandler(markRedemptionDeliveredSpec, f.deps)(req({ request_id: CRID, operator_id: "x", points: 5 }));
+  await createHandler(markNotificationsReadSpec, f.deps)(req({ notification_ids: [R1], admin_id: "otro" }));
+  await createHandler(markNotificationsReadSpec, f.deps)(req({ all: true }));
+  assertEquals(f.calls, [
+    { fn: "mark_redemption_delivered", args: { p_request_id: CRID.toLowerCase(), p_operator_id: "admin-1" } },
+    { fn: "mark_admin_notifications_read", args: { p_admin_id: "admin-1", p_notification_ids: [R1.toLowerCase()] } },
+    { fn: "mark_admin_notifications_read", args: { p_admin_id: "admin-1", p_notification_ids: null } },
+  ]);
+
+  const bad = await createHandler(markNotificationsReadSpec, fake().deps)(req({ notification_ids: [R1], all: true }));
+  assertEquals([bad.status, (await bad.json()).code], [400, "invalid_request"]);
 });

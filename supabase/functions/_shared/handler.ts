@@ -1,4 +1,5 @@
-// Flujo comun de las 3 Edge Functions: JWT -> rol -> cuerpo -> HMAC -> RPC.
+// Flujo comun de las Edge Functions: JWT -> rol -> cuerpo -> HMAC (solo si el
+// cuerpo trae uid) -> RPC.
 // Todo lo externo (Auth, tabla profiles, RPC, secreto) entra por `Deps`, de
 // modo que las pruebas lo reemplazan por un cliente simulado.
 
@@ -21,12 +22,19 @@ export interface Deps {
   hmacSecret: string | undefined;
 }
 
-export interface FunctionSpec<T extends { uid: string }> {
+/** HMAC del UID para cuerpos con tarjeta; null para los que no traen uid. */
+export type UidHmacFor<T> = T extends { uid: string } ? string : null;
+
+export interface FunctionSpec<T extends object> {
   name: string;
   roles: readonly string[];
   parse(body: unknown): Parsed<T>;
   /** Funcion SQL y argumentos (operator_id sale del JWT, nunca del body). */
-  toRpc(body: T, uidHmac: string, operatorId: string): { fn: string; args: Record<string, unknown> };
+  toRpc(body: T, uidHmac: UidHmacFor<T>, operatorId: string): { fn: string; args: Record<string, unknown> };
+}
+
+function hasUid(body: object): body is { uid: string } {
+  return typeof (body as { uid?: unknown }).uid === "string";
 }
 
 function bearer(req: Request): string | null {
@@ -34,7 +42,7 @@ function bearer(req: Request): string | null {
   return m ? m[1] : null;
 }
 
-export function createHandler<T extends { uid: string }>(spec: FunctionSpec<T>, deps: Deps) {
+export function createHandler<T extends object>(spec: FunctionSpec<T>, deps: Deps) {
   return async (req: Request): Promise<Response> => {
     try {
       if (req.method !== "POST") return invalidRequest("se espera POST");
@@ -59,13 +67,16 @@ export function createHandler<T extends { uid: string }>(spec: FunctionSpec<T>, 
       const parsed = spec.parse(raw);
       if (!parsed.ok) return invalidRequest(parsed.message);
 
-      // 4) HMAC + RPC
-      if (!deps.hmacSecret) {
-        console.error(`[${spec.name}] CARD_UID_HMAC_SECRET no configurado`);
-        return serverError();
+      // 4) HMAC (solo si hay tarjeta de por medio) + RPC
+      let hmac: string | null = null;
+      if (hasUid(parsed.value)) {
+        if (!deps.hmacSecret) {
+          console.error(`[${spec.name}] CARD_UID_HMAC_SECRET no configurado`);
+          return serverError();
+        }
+        hmac = await uidHmac(parsed.value.uid, deps.hmacSecret);
       }
-      const hmac = await uidHmac(parsed.value.uid, deps.hmacSecret);
-      const { fn, args } = spec.toRpc(parsed.value, hmac, user.id);
+      const { fn, args } = spec.toRpc(parsed.value, hmac as UidHmacFor<T>, user.id);
       const { data, error } = await deps.rpc(fn, args);
       if (error) {
         console.error(`[${spec.name}] rpc ${fn} fallo (code=${error.code ?? "?"})`);
