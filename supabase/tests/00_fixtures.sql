@@ -12,7 +12,10 @@ create schema if not exists auth;
 -- para que las aserciones sean deterministas.
 create table if not exists auth.users (
   id    uuid primary key,
-  email text unique
+  email text unique,
+  -- app_metadata de Supabase Auth (solo lo escribe el backend con service_role).
+  -- 007_volunteer_registration.sql lo usa para reconocer cuentas propias.
+  raw_app_meta_data jsonb not null default '{}'::jsonb
 );
 
 -- En Supabase real, auth.uid()/auth.role() leen el JWT verificado por

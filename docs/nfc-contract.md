@@ -102,6 +102,25 @@ Lecturas (RLS):
 - admin_notifications_feed (vista): solo admins; read_at es el del admin que consulta (null = no leída).
 - Voluntarios y guards no ven notificaciones.
 
+Alta con cuenta de acceso (supabase/007_volunteer_registration.sql). enroll-volunteer (función 2) no cambia.
+13) register-volunteer-account (rol: admin)
+   Request:  { client_request_id: uuid v4, full_name: string (1-120), community: string (1-120), uid: string,
+               email: string (<=254; se recorta y pasa a minúsculas), password: string (>= 8 caracteres, <= 72 bytes) }
+             El rol lo asigna el servidor ('volunteer'); cualquier campo role/user_id del cuerpo se ignora.
+             Supabase Auth puede exigir una política más estricta: si la rechaza -> weak_password.
+             Reintentos: mismo client_request_id (y mismos datos salvo la contraseña).
+   Response ok: { code: "ok", replayed: boolean, registration_id, volunteer: { id, full_name, community, user_id },
+                  account: { user_id, email }, card_id }
+   Códigos: ok | email_in_use (la cuenta existente no se modifica ni se vincula) | card_in_use | weak_password
+            | invalid_email | account_conflict | idempotency_conflict | registration_not_pending
+            Los conflictos que ocurren después de crear la cuenta traen account_cleanup: "done" (la cuenta se borró)
+            o "pending" (no se pudo borrar; reintentar con el mismo client_request_id vuelve a intentarlo).
+   HTTP 500 server_error = la operación quedó a medias de forma recuperable: reintentar con el mismo client_request_id.
+   La cuenta se crea con el email ya confirmado. La contraseña no se guarda en tablas, auditoría ni logs.
+
+Cambio de contraseña (opcional, sin Edge Function): el usuario con sesión usa supabase.auth.updateUser({ password })
+tras verificar su contraseña actual. Nunca recibe un id de usuario.
+
 ## HTTP
 200 para todos los códigos de negocio (incluidos los de error de negocio).
 400 { code: "invalid_request", message } | 401 { code: "unauthorized" } | 403 { code: "forbidden" }

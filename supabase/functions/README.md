@@ -18,6 +18,10 @@ que reciben `uid`) y llama a la funcion SQL con `service_role`.
 | `redeem-rewards`       | volunteer     | `redeem_rewards`       | 006       |
 | `mark-redemption-delivered` | admin    | `mark_redemption_delivered` | 006  |
 | `mark-notifications-read` | admin      | `mark_admin_notifications_read` | 006 |
+| `register-volunteer-account` | admin   | `begin_` / `complete_` / `fail_volunteer_registration` + `auth.admin.createUser` | 007 |
+
+`register-volunteer-account` no usa `createHandler`: orquesta SQL + Supabase
+Auth en `_shared/registration.ts` (reusa `authorize()` para JWT y rol).
 
 `operator_id` siempre es el id del usuario autenticado, nunca un valor del body.
 HTTP: 401 `unauthorized`, 403 `forbidden`, 400 `invalid_request`, 200 para todo
@@ -56,7 +60,8 @@ Para `update-volunteer` y `deactivate-volunteer` (migracion 003) seguir
 `update-reward` y `deactivate-reward` (migracion 004),
 `docs/deploy-004-rewards-management.md`. Para `link-volunteer-account`
 (migracion 005), `docs/deploy-005-volunteer-accounts.md`. Para canjes y
-notificaciones (migracion 006), `docs/deploy-006-redemptions.md`.
+notificaciones (migracion 006), `docs/deploy-006-redemptions.md`. Para el
+alta con cuenta (migracion 007), `docs/deploy-007-volunteer-registration.md`.
 
 Por defecto Supabase exige un JWT valido en el gateway (`verify_jwt`); ademas
 cada funcion lo revalida con `auth.getUser` y comprueba el rol. Antes de

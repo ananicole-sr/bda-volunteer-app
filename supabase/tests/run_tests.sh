@@ -2,7 +2,8 @@
 # ============================================================================
 # Corre las pruebas de supabase/002_nfc_security.sql,
 # supabase/003_volunteer_management.sql, supabase/004_rewards_management.sql,
-# supabase/005_volunteer_accounts.sql y supabase/006_redemptions.sql contra un Postgres
+# supabase/005_volunteer_accounts.sql, supabase/006_redemptions.sql y
+# supabase/007_volunteer_registration.sql contra un Postgres
 # local (no contra el proyecto de Supabase real).
 #
 # Variables de entorno opcionales:
@@ -57,11 +58,13 @@ prepare_db "$TESTDB"
   -f "$SUPABASE_DIR/004_rewards_management.sql" \
   -f "$SUPABASE_DIR/005_volunteer_accounts.sql" \
   -f "$SUPABASE_DIR/006_redemptions.sql" \
+  -f "$SUPABASE_DIR/007_volunteer_registration.sql" \
   -f "$SCRIPT_DIR/10_test_cases.sql" \
   -f "$SCRIPT_DIR/20_volunteer_management_cases.sql" \
   -f "$SCRIPT_DIR/30_rewards_management_cases.sql" \
   -f "$SCRIPT_DIR/40_volunteer_accounts_cases.sql" \
-  -f "$SCRIPT_DIR/50_redemptions_cases.sql"
+  -f "$SCRIPT_DIR/50_redemptions_cases.sql" \
+  -f "$SCRIPT_DIR/60_volunteer_registration_cases.sql"
 MAIN_STATUS=$?
 
 echo
@@ -231,6 +234,49 @@ if [ "$R6" = "ok:false,|ok:true," ] && [ "$P6" = "90" ] && [ "$S6" = "9" ] && [ 
   echo "PASS - mismo request_id en paralelo -> ok + ok replayed; 1 cobro, 1 de stock, 1 solicitud, 1 notificacion"
 else
   echo "FAIL - concurrencia reintento: $R6 puntos=$P6 stock=$S6 solicitudes=$N6 notificaciones=$M6"; CONC_STATUS=1
+fi
+
+echo
+echo "== [1e] Concurrencia (007): dos altas con la misma tarjeta en paralelo =="
+# Dos solicitudes distintas (emails distintos, misma tarjeta) ya pasaron begin
+# y tienen su cuenta creada; ambas llaman complete a la vez. Solo una puede
+# quedarse la tarjeta: la otra debe responder card_in_use con cleanup.
+REG_SETUP="$("$PSQL" -d "$TESTDB" -At -v ON_ERROR_STOP=1 <<'SQL' | grep -E '^[0-9a-f-]{36}$'
+set app.card_hmac_secret = 'test-only-secret-do-not-use-in-prod';
+select encode(extensions.hmac('CC0000E7', current_setting('app.card_hmac_secret'), 'sha256'), 'hex') as h \gset
+set role service_role;
+select begin_volunteer_registration('e7100000-0000-4000-8000-00000000000a', 'conc007-a@test.local', :'h', 'Conc A', 'x', null)->>'registration_id';
+select begin_volunteer_registration('e7100000-0000-4000-8000-00000000000b', 'conc007-b@test.local', :'h', 'Conc B', 'x', null)->>'registration_id';
+SQL
+)"
+REG_A="$(echo "$REG_SETUP" | sed -n 1p)"; REG_B="$(echo "$REG_SETUP" | sed -n 2p)"
+"$PSQL" -d "$TESTDB" -v ON_ERROR_STOP=1 -q -c "
+  insert into auth.users (id, email, raw_app_meta_data) values
+    ('e7200000-0000-0000-0000-00000000000a', 'conc007-a@test.local', jsonb_build_object('bamx_registration_id', '$REG_A')),
+    ('e7200000-0000-0000-0000-00000000000b', 'conc007-b@test.local', jsonb_build_object('bamx_registration_id', '$REG_B'));" \
+  || fail_setup "setup de concurrencia 007"
+complete_call() { # $1 registration_id  $2 auth_user_id  $3 sleep-after
+  "$PSQL" -d "$TESTDB" -At -v ON_ERROR_STOP=1 2>&1 <<SQL | grep -vE '^$|^SET$|^BEGIN$|^COMMIT$|^[0-9]+$'
+begin;
+set local role service_role;
+select complete_volunteer_registration('$1', '$2', null)->>'code';
+select pg_sleep($3);
+commit;
+SQL
+}
+CA="$(mktemp)"; CB="$(mktemp)"
+complete_call "$REG_A" e7200000-0000-0000-0000-00000000000a 3 >"$CA" & PA=$!
+sleep 1
+complete_call "$REG_B" e7200000-0000-0000-0000-00000000000b 0 >"$CB" & PB=$!
+wait $PA $PB
+R7="$(tr '\n' ',' <"$CA")|$(tr '\n' ',' <"$CB")"
+rm -f "$CA" "$CB"
+V7="$("$PSQL" -d "$TESTDB" -At -c "select count(*) from volunteers where user_id in ('e7200000-0000-0000-0000-00000000000a', 'e7200000-0000-0000-0000-00000000000b')")"
+P7="$("$PSQL" -d "$TESTDB" -At -c "select count(*) from profiles where id = 'e7200000-0000-0000-0000-00000000000b'")"
+if [ "$R7" = "ok,|card_in_use," ] && [ "$V7" = "1" ] && [ "$P7" = "0" ]; then
+  echo "PASS - 2 altas con la misma tarjeta en paralelo -> ok + card_in_use; 1 voluntario, el perdedor sin profile"
+else
+  echo "FAIL - concurrencia alta: $R7 voluntarios=$V7 profile_perdedor=$P7 (esperado 'ok,|card_in_use,', 1, 0)"; CONC_STATUS=1
 fi
 
 echo
