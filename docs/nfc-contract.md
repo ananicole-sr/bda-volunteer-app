@@ -21,6 +21,7 @@ El cliente normaliza antes de enviar; el servidor vuelve a normalizar y rechaza 
    Request:  { volunteer_id: uuid, uid: string }
    Response: { code, message?, card_id?: uuid, revoked_previous?: boolean }
    Códigos: ok | card_in_use | volunteer_not_found
+   (volunteer_not_found responde 200 desde la migración 008; antes un voluntario inexistente daba 500.)
 4) update-volunteer (rol: admin) — SQL: update_volunteer (supabase/003_volunteer_management.sql)
    Request:  { volunteer_id: uuid, full_name?: string (1-120), community?: string (1-120) }
              Al menos uno de full_name / community. Omitido = no cambiar; null es inválido.
@@ -124,6 +125,11 @@ tras verificar su contraseña actual. Nunca recibe un id de usuario.
 ## HTTP
 200 para todos los códigos de negocio (incluidos los de error de negocio).
 400 { code: "invalid_request", message } | 401 { code: "unauthorized" } | 403 { code: "forbidden" }
+403 { code: "origin_not_allowed" }: petición de navegador cuyo Origin no está en CORS_ALLOWED_ORIGINS
+(no se ejecuta nada). Las peticiones sin Origin (app nativa, curl) no cambian.
+CORS (todas las funciones): OPTIONS -> 204 con Access-Control-Allow-Methods "POST, OPTIONS" y
+Access-Control-Allow-Headers "authorization, apikey, content-type, x-client-info", sin autenticar ni ejecutar
+lógica. Toda respuesta a un Origin permitido (200, 400, 401, 403, 500) lleva Access-Control-Allow-Origin y Vary: Origin.
 El cliente trata "ok" y "duplicate_event" como éxito (duplicate_event devuelve el resultado original).
 
 ## Roles y lecturas

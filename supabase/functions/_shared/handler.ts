@@ -3,6 +3,7 @@
 // Todo lo externo (Auth, tabla profiles, RPC, secreto) entra por `Deps`, de
 // modo que las pruebas lo reemplazan por un cliente simulado.
 
+import { withCors } from "./cors.ts";
 import { uidHmac } from "./hmac.ts";
 import { forbidden, invalidRequest, ok, serverError, unauthorized } from "./http.ts";
 import type { Parsed } from "./validate.ts";
@@ -20,6 +21,8 @@ export interface Deps {
   rpc(fn: string, args: Record<string, unknown>): Promise<RpcResult>;
   /** CARD_UID_HMAC_SECRET */
   hmacSecret: string | undefined;
+  /** CORS_ALLOWED_ORIGINS ya normalizada (ver cors.ts). Sin valor = ningun origen de navegador. */
+  allowedOrigins?: readonly string[];
 }
 
 /** HMAC del UID para cuerpos con tarjeta; null para los que no traen uid. */
@@ -71,7 +74,8 @@ export async function readJson(req: Request): Promise<{ value: unknown } | null>
 }
 
 export function createHandler<T extends object>(spec: FunctionSpec<T>, deps: Deps) {
-  return async (req: Request): Promise<Response> => {
+  // withCors responde OPTIONS y rechaza orígenes no permitidos ANTES de este flujo.
+  return withCors(async (req: Request): Promise<Response> => {
     try {
       // 1) y 2) Sesion y rol
       const auth = await authorize(req, deps, spec.roles);
@@ -112,5 +116,5 @@ export function createHandler<T extends object>(spec: FunctionSpec<T>, deps: Dep
       console.error(`[${spec.name}] error inesperado (${e instanceof Error ? e.name : typeof e})`);
       return serverError();
     }
-  };
+  }, deps.allowedOrigins ?? []);
 }

@@ -13,6 +13,7 @@
 // La contrasena solo viaja a Supabase Auth: no se guarda, no va a la RPC y
 // no aparece en ningun log.
 
+import { withCors } from "./cors.ts";
 import { authorize, type Deps, readJson } from "./handler.ts";
 import { uidHmac } from "./hmac.ts";
 import { invalidRequest, ok, serverError } from "./http.ts";
@@ -72,7 +73,8 @@ export function createRegistrationHandler(deps: RegistrationDeps) {
     return ok(publicBody(data, deleted ? "done" : "pending"));
   }
 
-  return async (req: Request): Promise<Response> => {
+  // withCors responde OPTIONS (sin Auth, RPC ni createUser) antes de este flujo.
+  return withCors(async (req: Request): Promise<Response> => {
     try {
       const auth = await authorize(req, deps, REGISTRATION_ROLES);
       if ("response" in auth) return auth.response;
@@ -165,5 +167,5 @@ export function createRegistrationHandler(deps: RegistrationDeps) {
       console.error(`[${NAME}] error inesperado (${e instanceof Error ? e.name : typeof e})`);
       return serverError();
     }
-  };
+  }, deps.allowedOrigins ?? []);
 }

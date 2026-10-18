@@ -32,11 +32,38 @@ codigo de negocio, 500 `server_error` (generico) ante errores inesperados.
 | Variable                     | Origen |
 |------------------------------|--------|
 | `CARD_UID_HMAC_SECRET`       | **La defines tu** con `supabase secrets set`. Debe ser el MISMO valor que `app.card_hmac_secret` al correr `002_nfc_security.sql`; si difieren, ninguna tarjeta migrada coincidira. Nunca va en el codigo. Las funciones de voluntarios (update/deactivate) y de recompensas no la usan. |
+| `CORS_ALLOWED_ORIGINS`       | **La defines tu**. Orígenes de navegador permitidos (Expo web), separados por coma, exactos: `scheme://host[:puerto]`, sin ruta ni `/` final. Ej.: `http://localhost:8081,https://<dominio-de-produccion>`. Sin la variable no se permite ningun navegador; la app nativa no la necesita. Ver "CORS" abajo. |
 | `SUPABASE_URL`               | La inyecta Supabase. |
 | `SUPABASE_SERVICE_ROLE_KEY`  | La inyecta Supabase. |
 
 `uid_hmac = hex(HMAC-SHA256(clave = CARD_UID_HMAC_SECRET, mensaje = UID normalizado en MAYUSCULAS))`,
 identico a `encode(extensions.hmac(upper(uid), secreto, 'sha256'), 'hex')` de SQL.
+
+## CORS (Expo web)
+
+Todas las funciones pasan por `_shared/cors.ts` (`withCors`, aplicado dentro de
+`createHandler` y `createRegistrationHandler`):
+
+- `OPTIONS` se responde antes de autenticar, sin llamar a Auth, RPC ni `createUser`:
+  `204` si el `Origin` esta permitido, `403 origin_not_allowed` si no.
+- `POST` desde un `Origin` permitido sigue el flujo normal (JWT, rol, validacion)
+  y toda respuesta (200/400/401/403/500) lleva `Access-Control-Allow-Origin` y `Vary: Origin`.
+- `POST` desde un `Origin` no permitido -> `403 origin_not_allowed`, sin ejecutar nada.
+- Sin `Origin` (app nativa, curl) -> igual que antes, sin headers CORS.
+- Headers permitidos: `authorization, apikey, content-type, x-client-info`
+  (los que manda supabase-js). Si el frontend agrega otro, va en
+  `CORS_ALLOWED_HEADERS` de `cors.ts`.
+
+Configurar (ejemplo con desarrollo local de Expo web + produccion):
+
+```bash
+supabase secrets set CORS_ALLOWED_ORIGINS='http://localhost:8081,https://<dominio-de-produccion>' --project-ref <ref>
+```
+
+`npx expo start --web` usa `http://localhost:8081` por defecto; si usas otro
+puerto o abres por IP (`http://192.168.x.x:8081`), agregalo tal cual. Cambiar el
+secreto no requiere redesplegar, pero las instancias ya calientes pueden tardar
+en tomarlo; redesplegar lo fuerza. **No** desactives `verify_jwt` para "arreglar" CORS.
 
 ## Pruebas (sin tocar el proyecto real)
 
@@ -62,6 +89,8 @@ Para `update-volunteer` y `deactivate-volunteer` (migracion 003) seguir
 (migracion 005), `docs/deploy-005-volunteer-accounts.md`. Para canjes y
 notificaciones (migracion 006), `docs/deploy-006-redemptions.md`. Para el
 alta con cuenta (migracion 007), `docs/deploy-007-volunteer-registration.md`.
+Para CORS y la correccion de `issue_card` (migracion 008),
+`docs/deploy-008-cors-issue-card.md`.
 
 Por defecto Supabase exige un JWT valido en el gateway (`verify_jwt`); ademas
 cada funcion lo revalida con `auth.getUser` y comprueba el rol. Antes de

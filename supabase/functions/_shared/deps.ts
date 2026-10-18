@@ -2,6 +2,7 @@
 // usan dobles de `Deps` y no cargan supabase-js.
 
 import { createClient } from "npm:@supabase/supabase-js@2";
+import { parseAllowedOrigins } from "./cors.ts";
 import type { Deps } from "./handler.ts";
 import type { AuthAdmin, AuthAdminErrorCode, RegistrationDeps } from "./registration.ts";
 
@@ -17,6 +18,7 @@ function adminClient() {
 export function realDeps(admin = adminClient()): Deps {
   return {
     hmacSecret: Deno.env.get("CARD_UID_HMAC_SECRET"),
+    allowedOrigins: parseAllowedOrigins(Deno.env.get("CORS_ALLOWED_ORIGINS")),
 
     async verifyToken(token) {
       const { data, error } = await admin.auth.getUser(token);

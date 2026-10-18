@@ -2,8 +2,9 @@
 # ============================================================================
 # Corre las pruebas de supabase/002_nfc_security.sql,
 # supabase/003_volunteer_management.sql, supabase/004_rewards_management.sql,
-# supabase/005_volunteer_accounts.sql, supabase/006_redemptions.sql y
-# supabase/007_volunteer_registration.sql contra un Postgres
+# supabase/005_volunteer_accounts.sql, supabase/006_redemptions.sql,
+# supabase/007_volunteer_registration.sql y supabase/008_fix_issue_card.sql
+# contra un Postgres
 # local (no contra el proyecto de Supabase real).
 #
 # Variables de entorno opcionales:
@@ -59,12 +60,14 @@ prepare_db "$TESTDB"
   -f "$SUPABASE_DIR/005_volunteer_accounts.sql" \
   -f "$SUPABASE_DIR/006_redemptions.sql" \
   -f "$SUPABASE_DIR/007_volunteer_registration.sql" \
+  -f "$SUPABASE_DIR/008_fix_issue_card.sql" \
   -f "$SCRIPT_DIR/10_test_cases.sql" \
   -f "$SCRIPT_DIR/20_volunteer_management_cases.sql" \
   -f "$SCRIPT_DIR/30_rewards_management_cases.sql" \
   -f "$SCRIPT_DIR/40_volunteer_accounts_cases.sql" \
   -f "$SCRIPT_DIR/50_redemptions_cases.sql" \
-  -f "$SCRIPT_DIR/60_volunteer_registration_cases.sql"
+  -f "$SCRIPT_DIR/60_volunteer_registration_cases.sql" \
+  -f "$SCRIPT_DIR/70_issue_card_cases.sql"
 MAIN_STATUS=$?
 
 echo
@@ -359,11 +362,32 @@ fi
 "$PSQL" -d postgres -c "drop database if exists \"$LGDB\";" >/dev/null 2>&1
 
 echo
+echo "== [2d] issue_card con voluntario inexistente: sin 008 falla, con 008 responde volunteer_not_found =="
+ICDB="${ICDB:-nfc_security_test_issue_card_008}"
+prepare_db "$ICDB"
+"$PSQL" -d "$ICDB" -v ON_ERROR_STOP=1 -q -f "$SCRIPT_DIR/00_fixtures.sql" -f "$SCRIPT_DIR/00b_set_test_secret.sql" \
+  -f "$SUPABASE_DIR/schema.sql" -f "$SUPABASE_DIR/002_nfc_security.sql" \
+  || fail_setup "no se pudo preparar el esquema 002 en $ICDB"
+IC_CALL="set role service_role; select issue_card('00000000-0000-4000-8000-0000000000ff', repeat('a', 64), null)->>'code';"
+IC_BEFORE="$("$PSQL" -d "$ICDB" -At -c "$IC_CALL" 2>&1 | grep -oE 'foreign key|volunteer_not_found' | head -1)"
+"$PSQL" -d "$ICDB" -v ON_ERROR_STOP=1 -q -f "$SUPABASE_DIR/008_fix_issue_card.sql" >/dev/null 2>&1
+IC_RC=$?
+IC_AFTER="$("$PSQL" -d "$ICDB" -At -c "$IC_CALL" 2>&1 | tail -1)"
+if [ "$IC_BEFORE" = "foreign key" ] && [ "$IC_RC" -eq 0 ] && [ "$IC_AFTER" = "volunteer_not_found" ]; then
+  echo "PASS - sin 008: error de foreign key; con 008: volunteer_not_found"
+  IC_STATUS=0
+else
+  echo "FAIL - issue_card antes='$IC_BEFORE' rc=$IC_RC despues='$IC_AFTER'"
+  IC_STATUS=1
+fi
+"$PSQL" -d postgres -c "drop database if exists \"$ICDB\";" >/dev/null 2>&1
+
+echo
 echo "== [3/3] Resultado =="
-if [ "$MAIN_STATUS" -eq 0 ] && [ "$GUARD_STATUS" -eq 0 ] && [ "${BF_STATUS:-0}" -eq 0 ] && [ "${CONC_STATUS:-0}" -eq 0 ] && [ "${LG_STATUS:-0}" -eq 0 ]; then
+if [ "$MAIN_STATUS" -eq 0 ] && [ "$GUARD_STATUS" -eq 0 ] && [ "${BF_STATUS:-0}" -eq 0 ] && [ "${CONC_STATUS:-0}" -eq 0 ] && [ "${LG_STATUS:-0}" -eq 0 ] && [ "${IC_STATUS:-0}" -eq 0 ]; then
   echo "TODO PASS"
   exit 0
 else
-  echo "HAY FALLAS (ver arriba). main_status=$MAIN_STATUS guard_status=$GUARD_STATUS bf_status=${BF_STATUS:-0} conc_status=${CONC_STATUS:-0} legacy_status=${LG_STATUS:-0}"
+  echo "HAY FALLAS (ver arriba). main_status=$MAIN_STATUS guard_status=$GUARD_STATUS bf_status=${BF_STATUS:-0} conc_status=${CONC_STATUS:-0} legacy_status=${LG_STATUS:-0} issue_card_status=${IC_STATUS:-0}"
   exit 1
 fi
