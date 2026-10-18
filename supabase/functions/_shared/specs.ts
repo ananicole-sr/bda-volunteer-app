@@ -1,14 +1,20 @@
 import type { FunctionSpec } from "./handler.ts";
 import {
   type CheckInBody,
+  type CreateRewardBody,
+  type DeactivateRewardBody,
   type DeactivateVolunteerBody,
   type EnrollBody,
   type IssueCardBody,
   parseCheckIn,
+  parseCreateReward,
+  parseDeactivateReward,
   parseDeactivateVolunteer,
   parseEnroll,
   parseIssueCard,
+  parseUpdateReward,
   parseUpdateVolunteer,
+  type UpdateRewardBody,
   type UpdateVolunteerBody,
 } from "./validate.ts";
 
@@ -75,5 +81,50 @@ export const deactivateVolunteerSpec: FunctionSpec<DeactivateVolunteerBody> = {
   toRpc: (b, _hmac, operatorId) => ({
     fn: "deactivate_volunteer",
     args: { p_volunteer_id: b.volunteer_id, p_operator_id: operatorId },
+  }),
+};
+
+export const createRewardSpec: FunctionSpec<CreateRewardBody> = {
+  name: "create-reward",
+  roles: ["admin"],
+  parse: parseCreateReward,
+  toRpc: (b, _hmac, operatorId) => ({
+    fn: "create_reward",
+    args: {
+      p_name: b.name,
+      p_description: b.description,
+      p_points_cost: b.points_cost,
+      p_stock: b.stock,
+      p_operator_id: operatorId,
+    },
+  }),
+};
+
+export const updateRewardSpec: FunctionSpec<UpdateRewardBody> = {
+  name: "update-reward",
+  roles: ["admin"],
+  parse: parseUpdateReward,
+  toRpc: (b, _hmac, operatorId) => ({
+    fn: "update_reward",
+    args: {
+      p_reward_id: b.reward_id,
+      p_name: b.name ?? null,
+      p_description: b.description ?? null,
+      // description: null (o vacia) en el cuerpo = borrarla; ausente = no cambiar.
+      p_clear_description: "description" in b && b.description === null,
+      p_points_cost: b.points_cost ?? null,
+      p_stock: b.stock ?? null,
+      p_operator_id: operatorId,
+    },
+  }),
+};
+
+export const deactivateRewardSpec: FunctionSpec<DeactivateRewardBody> = {
+  name: "deactivate-reward",
+  roles: ["admin"],
+  parse: parseDeactivateReward,
+  toRpc: (b, _hmac, operatorId) => ({
+    fn: "deactivate_reward",
+    args: { p_reward_id: b.reward_id, p_operator_id: operatorId },
   }),
 };

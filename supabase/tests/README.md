@@ -1,7 +1,8 @@
-# Pruebas de `002_nfc_security.sql` y `003_volunteer_management.sql`
+# Pruebas de `002_nfc_security.sql`, `003_volunteer_management.sql` y `004_rewards_management.sql`
 
-`run_tests.sh` aplica 002 y 003 y corre `10_test_cases.sql` (002) y
-`20_volunteer_management_cases.sql` (003, imprime su propia tabla y resumen).
+`run_tests.sh` aplica 002, 003 y 004 y corre `10_test_cases.sql` (002),
+`20_volunteer_management_cases.sql` (003) y `30_rewards_management_cases.sql`
+(004); cada archivo imprime su propia tabla y resumen.
 
 En Linux con PostgreSQL 16 instalado (sin tocar el servicio del sistema), un
 cluster desechable equivalente al de abajo:

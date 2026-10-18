@@ -36,6 +36,26 @@ El cliente normaliza antes de enviar; el servidor vuelve a normalizar y rechaza 
    Idempotente. No revoca la tarjeta: el check-in de un voluntario inactivo responde volunteer_inactive.
    No hay reactivación todavía.
 
+Recompensas (supabase/004_rewards_management.sql). Las 3 son solo admin. Todas devuelven
+reward = { id, name, description (string|null), points_cost, stock, is_active, created_at }.
+points_cost y stock: enteros JSON (no texto, no decimales) entre 0 y 2147483647.
+name: 1-120 caracteres tras recortar. description: hasta 500; vacía o null = sin descripción.
+6) create-reward
+   Request:  { name: string, description?: string|null, points_cost: integer, stock: integer }
+   Response: { code: "ok", reward }   (se crea activa)
+7) update-reward
+   Request:  { reward_id: uuid, name?, description?: string|null, points_cost?, stock? }
+             Al menos un campo. Omitido = no cambiar; description null o "" = borrarla.
+   Response: { code, message?, changed_fields?: ('name'|'description'|'points_cost'|'stock')[], reward? }
+   Códigos: ok | reward_not_found
+8) deactivate-reward
+   Request:  { reward_id: uuid }
+   Response: { code, message?, already_inactive?: boolean, reward? }
+   Códigos: ok | reward_not_found
+   is_active = false; nunca se borra la fila, así que reward_redemptions conserva su historial.
+   Idempotente. No hay reactivación todavía. update-reward funciona también sobre inactivas.
+Cualquier otro campo del cuerpo (is_active, id, operator_id...) se ignora.
+
 ## HTTP
 200 para todos los códigos de negocio (incluidos los de error de negocio).
 400 { code: "invalid_request", message } | 401 { code: "unauthorized" } | 403 { code: "forbidden" }
