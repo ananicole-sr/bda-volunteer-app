@@ -2,7 +2,7 @@
 import { FunctionsFetchError, FunctionsHttpError } from '@supabase/supabase-js';
 
 import { EdgeFunctionError } from '@/lib/edgeFunctions';
-import { deactivateVolunteer, updateVolunteer } from '../volunteers';
+import { deactivateVolunteer, linkVolunteerAccount, updateVolunteer } from '../volunteers';
 
 const mockInvoke = jest.fn();
 
@@ -107,5 +107,28 @@ describe('errores de transporte', () => {
   it('respuesta 200 sin code -> server_error', async () => {
     mockInvoke.mockResolvedValueOnce({ data: { sin: 'code' }, error: null });
     expect((await errorOf(deactivateVolunteer(ID))).code).toBe('server_error');
+  });
+});
+
+describe('linkVolunteerAccount', () => {
+  const USER = 'f1000000-0000-0000-0000-00000000000a';
+
+  it('manda volunteer_id y user_id y devuelve el resultado de negocio', async () => {
+    const ok = { code: 'ok', already_linked: false, volunteer: { id: ID, full_name: 'Ana', user_id: USER } };
+    mockInvoke.mockResolvedValueOnce({ data: ok, error: null });
+    expect(await linkVolunteerAccount(ID, USER)).toEqual(ok);
+    expect(mockInvoke.mock.calls).toEqual([
+      ['link-volunteer-account', { body: { volunteer_id: ID, user_id: USER } }],
+    ]);
+  });
+
+  it('los conflictos llegan como codigo, no como excepcion', async () => {
+    mockInvoke.mockResolvedValueOnce({ data: { code: 'account_in_use', message: 'x' }, error: null });
+    expect((await linkVolunteerAccount(ID, USER)).code).toBe('account_in_use');
+  });
+
+  it('un no-admin recibe EdgeFunctionError forbidden', async () => {
+    mockInvoke.mockResolvedValueOnce({ data: null, error: httpError(403, { code: 'forbidden' }) });
+    expect((await errorOf(linkVolunteerAccount(ID, USER))).code).toBe('forbidden');
   });
 });

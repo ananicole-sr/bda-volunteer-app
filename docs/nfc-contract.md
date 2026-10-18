@@ -56,6 +56,23 @@ name: 1-120 caracteres tras recortar. description: hasta 500; vacía o null = si
    Idempotente. No hay reactivación todavía. update-reward funciona también sobre inactivas.
 Cualquier otro campo del cuerpo (is_active, id, operator_id...) se ignora.
 
+Cuentas de voluntario (supabase/005_volunteer_accounts.sql).
+9) link-volunteer-account (rol: admin)
+   Request:  { volunteer_id: uuid, user_id: uuid }   user_id = auth.users.id de una cuenta que YA existe
+             y YA tiene profiles.role = 'volunteer'. No crea cuentas, no asigna roles, no busca por email/nombre.
+   Response: { code, message?, already_linked?: boolean, volunteer?: { id, full_name, user_id } }
+   Códigos: ok | volunteer_not_found | account_not_found | account_not_volunteer
+            | volunteer_already_linked (el voluntario ya tiene OTRA cuenta; no se sobrescribe)
+            | account_in_use (la cuenta ya está en otro voluntario)
+   Repetir el mismo vínculo responde ok con already_linked = true. Vínculo y auditoría van en la misma transacción.
+
+Lecturas del rol volunteer (RLS, sin Edge Function; el cliente consulta con su sesión):
+- volunteers: solo su fila (user_id = auth.uid()).
+- check_ins y reward_redemptions: solo las de su voluntario.
+- rewards: las activas, más las que él canjeó aunque hoy estén inactivas.
+- Nada de cards, audit_logs, point_tiers ni datos de otros voluntarios.
+Una cuenta volunteer sin vincular solo ve el catálogo activo.
+
 ## HTTP
 200 para todos los códigos de negocio (incluidos los de error de negocio).
 400 { code: "invalid_request", message } | 401 { code: "unauthorized" } | 403 { code: "forbidden" }
@@ -64,6 +81,7 @@ El cliente trata "ok" y "duplicate_event" como éxito (duplicate_event devuelve 
 ## Roles y lecturas
 Tabla profiles(id = auth.uid(), role in 'admin' | 'guard' | 'volunteer').
 Policy obligatoria: cada usuario autenticado puede leer SU propia fila de profiles.
+Una cuenta volunteer se liga a su registro con volunteers.user_id (ver función 9).
 Con sesión admin, el dashboard sigue leyendo volunteers con el mismo select de hoy, sin nfc_uid.
 Cuentas de desarrollo: admin@bamx.test y guard@bamx.test (las crea el responsable a mano en Supabase Auth).
 

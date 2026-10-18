@@ -1,8 +1,10 @@
-# Pruebas de `002_nfc_security.sql`, `003_volunteer_management.sql` y `004_rewards_management.sql`
+# Pruebas de las migraciones 002 a 005
 
-`run_tests.sh` aplica 002, 003 y 004 y corre `10_test_cases.sql` (002),
-`20_volunteer_management_cases.sql` (003) y `30_rewards_management_cases.sql`
-(004); cada archivo imprime su propia tabla y resumen.
+`run_tests.sh` aplica 002, 003, 004 y 005 y corre `10_test_cases.sql` (002),
+`20_volunteer_management_cases.sql` (003), `30_rewards_management_cases.sql`
+(004) y `40_volunteer_accounts_cases.sql` (005); cada archivo imprime su
+propia tabla y resumen. La seccion [1c] prueba en paralelo que una misma
+cuenta no quede vinculada a dos voluntarios.
 
 En Linux con PostgreSQL 16 instalado (sin tocar el servicio del sistema), un
 cluster desechable equivalente al de abajo:

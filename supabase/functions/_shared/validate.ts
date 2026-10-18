@@ -246,3 +246,20 @@ export function parseDeactivateReward(body: unknown): Parsed<DeactivateRewardBod
   if ("ok" in id) return id;
   return { ok: true, value: { reward_id: id.value } };
 }
+
+// ---------------------------------------------------------------- cuentas de voluntario
+
+export interface LinkVolunteerAccountBody {
+  volunteer_id: string;
+  user_id: string; // auth.users.id de una cuenta que ya existe con role volunteer
+}
+
+export function parseLinkVolunteerAccount(body: unknown): Parsed<LinkVolunteerAccountBody> {
+  const b = asRecord(body);
+  if (!b) return fail("el cuerpo debe ser un objeto JSON");
+  const vid = volunteerId(b.volunteer_id);
+  if ("ok" in vid) return vid;
+  const uid = uuidField(b.user_id, "user_id");
+  if ("ok" in uid) return uid;
+  return { ok: true, value: { volunteer_id: vid.value, user_id: uid.value } };
+}

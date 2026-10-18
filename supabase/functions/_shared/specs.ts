@@ -6,12 +6,14 @@ import {
   type DeactivateVolunteerBody,
   type EnrollBody,
   type IssueCardBody,
+  type LinkVolunteerAccountBody,
   parseCheckIn,
   parseCreateReward,
   parseDeactivateReward,
   parseDeactivateVolunteer,
   parseEnroll,
   parseIssueCard,
+  parseLinkVolunteerAccount,
   parseUpdateReward,
   parseUpdateVolunteer,
   type UpdateRewardBody,
@@ -126,5 +128,15 @@ export const deactivateRewardSpec: FunctionSpec<DeactivateRewardBody> = {
   toRpc: (b, _hmac, operatorId) => ({
     fn: "deactivate_reward",
     args: { p_reward_id: b.reward_id, p_operator_id: operatorId },
+  }),
+};
+
+export const linkVolunteerAccountSpec: FunctionSpec<LinkVolunteerAccountBody> = {
+  name: "link-volunteer-account",
+  roles: ["admin"],
+  parse: parseLinkVolunteerAccount,
+  toRpc: (b, _hmac, operatorId) => ({
+    fn: "link_volunteer_account",
+    args: { p_volunteer_id: b.volunteer_id, p_user_id: b.user_id, p_operator_id: operatorId },
   }),
 };

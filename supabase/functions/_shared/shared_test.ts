@@ -9,6 +9,7 @@ import {
   deactivateVolunteerSpec,
   enrollVolunteerSpec,
   issueCardSpec,
+  linkVolunteerAccountSpec,
   updateRewardSpec,
   updateVolunteerSpec,
 } from "./specs.ts";
@@ -20,6 +21,7 @@ import {
   parseDeactivateVolunteer,
   parseEnroll,
   parseIssueCard,
+  parseLinkVolunteerAccount,
   parseUpdateReward,
   parseUpdateVolunteer,
   PG_INT_MAX,
@@ -610,5 +612,78 @@ Deno.test("rewards: 200 pasa tal cual ok y reward_not_found; 500 generico ante e
     }
   } finally {
     console.error = origError;
+  }
+});
+
+// ---------------------------------------------------------------- link-volunteer-account
+const LINK_VID = "f2000000-0000-0000-0000-00000000000A";
+const LINK_UID = "F1000000-0000-0000-0000-00000000000A";
+const okLink = { volunteer_id: LINK_VID, user_id: LINK_UID };
+
+Deno.test("parseLinkVolunteerAccount: dos UUID en minusculas, descarta lo demas", () => {
+  const r = parseLinkVolunteerAccount({ ...okLink, email: "a@b.c", full_name: "Ana", role: "volunteer" });
+  assert(r.ok);
+  assertEquals(r.value, { volunteer_id: LINK_VID.toLowerCase(), user_id: LINK_UID.toLowerCase() });
+});
+
+Deno.test("parseLinkVolunteerAccount: rechaza ids faltantes o invalidos (no busca por email/nombre)", () => {
+  for (const bad of [
+    null, [], {}, { volunteer_id: LINK_VID }, { user_id: LINK_UID },
+    { ...okLink, user_id: "a@b.c" }, { ...okLink, volunteer_id: "Ana" },
+    { ...okLink, user_id: null }, { ...okLink, user_id: 5 },
+    { volunteer_id: LINK_VID, email: "vol-a@test.local" },
+  ]) assertEquals(parseLinkVolunteerAccount(bad).ok, false, JSON.stringify(bad));
+});
+
+Deno.test("link-volunteer-account: 401 sin sesion, 403 si no es admin (antes de validar el cuerpo)", async () => {
+  for (const r of [req(okLink, null), req(okLink, "bad-token")]) {
+    const f = fake();
+    const res = await createHandler(linkVolunteerAccountSpec, f.deps)(r);
+    assertEquals([res.status, await res.json()], [401, { code: "unauthorized" }]);
+    assertEquals(f.calls.length, 0);
+  }
+  for (const role of ["guard", "volunteer", null]) {
+    for (const body of [okLink, {}]) {
+      const f = fake({ role });
+      const res = await createHandler(linkVolunteerAccountSpec, f.deps)(req(body));
+      assertEquals([res.status, await res.json()], [403, { code: "forbidden" }], `role=${role}`);
+      assertEquals(f.calls.length, 0);
+    }
+  }
+});
+
+Deno.test("link-volunteer-account: 400 con cuerpo invalido, sin llamar RPC", async () => {
+  const f = fake();
+  const h = createHandler(linkVolunteerAccountSpec, f.deps);
+  for (const r of [req({ volunteer_id: LINK_VID }), req({ ...okLink, user_id: "x" }), req("{no json"), req({}, "good-token", "GET")]) {
+    const res = await h(r);
+    assertEquals(res.status, 400);
+    assertEquals((await res.json()).code, "invalid_request");
+  }
+  assertEquals(f.calls.length, 0);
+});
+
+Deno.test("link-volunteer-account: RPC con operator_id del JWT; no requiere CARD_UID_HMAC_SECRET", async () => {
+  const f = fake({ user: "admin-1", secret: undefined });
+  const res = await createHandler(linkVolunteerAccountSpec, f.deps)(req({ ...okLink, operator_id: "hacker" }));
+  assertEquals(res.status, 200);
+  assertEquals(f.calls, [{
+    fn: "link_volunteer_account",
+    args: { p_volunteer_id: LINK_VID.toLowerCase(), p_user_id: LINK_UID.toLowerCase(), p_operator_id: "admin-1" },
+  }]);
+});
+
+Deno.test("link-volunteer-account: 200 pasa tal cual ok y cada rechazo de negocio", async () => {
+  for (const data of [
+    { code: "ok", already_linked: false, volunteer: { id: "v", full_name: "A", user_id: "u" } },
+    { code: "ok", already_linked: true, volunteer: { id: "v", full_name: "A", user_id: "u" } },
+    { code: "volunteer_not_found", message: "El voluntario no existe" },
+    { code: "account_not_found", message: "La cuenta no existe" },
+    { code: "account_not_volunteer", message: "La cuenta no tiene el rol volunteer" },
+    { code: "volunteer_already_linked", message: "El voluntario ya esta vinculado a otra cuenta" },
+    { code: "account_in_use", message: "La cuenta ya esta vinculada a otro voluntario" },
+  ]) {
+    const res = await createHandler(linkVolunteerAccountSpec, fake({ rpc: { data, error: null } }).deps)(req(okLink));
+    assertEquals([res.status, await res.json()], [200, data]);
   }
 });

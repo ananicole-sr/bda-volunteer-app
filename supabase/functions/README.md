@@ -14,6 +14,7 @@ que reciben `uid`) y llama a la funcion SQL con `service_role`.
 | `create-reward`        | admin         | `create_reward`        | 004       |
 | `update-reward`        | admin         | `update_reward`        | 004       |
 | `deactivate-reward`    | admin         | `deactivate_reward`    | 004       |
+| `link-volunteer-account` | admin       | `link_volunteer_account` | 005     |
 
 `operator_id` siempre es el id del usuario autenticado, nunca un valor del body.
 HTTP: 401 `unauthorized`, 403 `forbidden`, 400 `invalid_request`, 200 para todo
@@ -50,7 +51,8 @@ supabase functions deploy issue-card --project-ref <ref>
 Para `update-volunteer` y `deactivate-volunteer` (migracion 003) seguir
 `docs/deploy-003-volunteer-management.md`. Para `create-reward`,
 `update-reward` y `deactivate-reward` (migracion 004),
-`docs/deploy-004-rewards-management.md`.
+`docs/deploy-004-rewards-management.md`. Para `link-volunteer-account`
+(migracion 005), `docs/deploy-005-volunteer-accounts.md`.
 
 Por defecto Supabase exige un JWT valido en el gateway (`verify_jwt`); ademas
 cada funcion lo revalida con `auth.getUser` y comprueba el rol. Antes de

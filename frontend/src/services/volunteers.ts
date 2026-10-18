@@ -2,13 +2,14 @@ import { callEdgeFunction } from '@/lib/edgeFunctions';
 import { supabase } from '@/lib/supabase';
 import type {
   DeactivateVolunteerResult,
+  LinkVolunteerAccountResult,
   UpdateVolunteerInput,
   UpdateVolunteerResult,
   Volunteer,
   VolunteerRow,
 } from '@/types/volunteer';
 
-function formatLastVisit(timestamp: string | null): string {
+export function formatLastVisit(timestamp: string | null): string {
   if (!timestamp) return 'Sin visitas';
 
   const date = new Date(timestamp);
@@ -86,4 +87,20 @@ export async function updateVolunteer(
  */
 export async function deactivateVolunteer(id: string): Promise<DeactivateVolunteerResult> {
   return callEdgeFunction<DeactivateVolunteerResult>('deactivate-volunteer', { volunteer_id: id });
+}
+
+/**
+ * Vincula un voluntario existente a una cuenta de Auth que ya existe y ya
+ * tiene role volunteer (Edge Function link-volunteer-account, solo admin).
+ * userId es el auth.users.id de la cuenta; no se busca por email ni nombre.
+ * Repetir el mismo vinculo responde ok con already_linked = true.
+ */
+export async function linkVolunteerAccount(
+  volunteerId: string,
+  userId: string
+): Promise<LinkVolunteerAccountResult> {
+  return callEdgeFunction<LinkVolunteerAccountResult>('link-volunteer-account', {
+    volunteer_id: volunteerId,
+    user_id: userId,
+  });
 }

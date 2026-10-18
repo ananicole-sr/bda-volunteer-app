@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 # ============================================================================
 # Corre las pruebas de supabase/002_nfc_security.sql,
-# supabase/003_volunteer_management.sql y supabase/004_rewards_management.sql
-# contra un Postgres
+# supabase/003_volunteer_management.sql, supabase/004_rewards_management.sql y
+# supabase/005_volunteer_accounts.sql contra un Postgres
 # local (no contra el proyecto de Supabase real).
 #
 # Variables de entorno opcionales:
@@ -55,9 +55,11 @@ prepare_db "$TESTDB"
   -f "$SUPABASE_DIR/002_nfc_security.sql" \
   -f "$SUPABASE_DIR/003_volunteer_management.sql" \
   -f "$SUPABASE_DIR/004_rewards_management.sql" \
+  -f "$SUPABASE_DIR/005_volunteer_accounts.sql" \
   -f "$SCRIPT_DIR/10_test_cases.sql" \
   -f "$SCRIPT_DIR/20_volunteer_management_cases.sql" \
-  -f "$SCRIPT_DIR/30_rewards_management_cases.sql"
+  -f "$SCRIPT_DIR/30_rewards_management_cases.sql" \
+  -f "$SCRIPT_DIR/40_volunteer_accounts_cases.sql"
 MAIN_STATUS=$?
 
 echo
@@ -112,6 +114,42 @@ if [ "$R2" = "ok,|duplicate_event," ]; then
   echo "PASS - mismo event_id en paralelo -> ok + duplicate_event, sin error"
 else
   echo "FAIL - concurrencia mismo event_id: $R2 (esperado 'ok,|duplicate_event,')"; CONC_STATUS=1
+fi
+
+echo
+echo "== [1c] Concurrencia (005): misma cuenta a dos voluntarios en paralelo =="
+# Sesion A vincula la cuenta al voluntario 1 y espera 3 s antes de COMMIT; B
+# intenta la misma cuenta con el voluntario 2 mientras A sigue abierta. B no
+# ve el vinculo sin confirmar de A, asi que debe ser el UNIQUE(user_id) el que
+# lo frene: esperado ok + account_in_use, sin error.
+"$PSQL" -d "$TESTDB" -v ON_ERROR_STOP=1 -q -c "
+  insert into auth.users (id, email) values ('c5000000-0000-0000-0000-0000000000aa', 'conc005@test.local');
+  insert into profiles (id, role) values ('c5000000-0000-0000-0000-0000000000aa', 'volunteer');
+  insert into volunteers (id, full_name, community) values
+    ('c5000000-0000-0000-0000-000000000001', 'Conc link 1', 'x'),
+    ('c5000000-0000-0000-0000-000000000002', 'Conc link 2', 'x');" || fail_setup "setup de concurrencia 005"
+
+link_call() { # $1 volunteer_id  $2 sleep-after (segundos)
+  "$PSQL" -d "$TESTDB" -At -v ON_ERROR_STOP=1 2>&1 <<SQL | grep -vE '^$|^SET$|^BEGIN$|^COMMIT$|^[0-9]+$'
+begin;
+set local role service_role;
+select link_volunteer_account('$1', 'c5000000-0000-0000-0000-0000000000aa', null)->>'code';
+select pg_sleep($2);
+commit;
+SQL
+}
+LA="$(mktemp)"; LB="$(mktemp)"
+link_call 'c5000000-0000-0000-0000-000000000001' 3 >"$LA" & PA=$!
+sleep 1
+link_call 'c5000000-0000-0000-0000-000000000002' 0 >"$LB" & PB=$!
+wait $PA $PB
+R3="$(tr '\n' ',' <"$LA")|$(tr '\n' ',' <"$LB")"
+rm -f "$LA" "$LB"
+LINKED="$("$PSQL" -d "$TESTDB" -At -c "select count(*) from volunteers where user_id = 'c5000000-0000-0000-0000-0000000000aa'")"
+if [ "$R3" = "ok,|account_in_use," ] && [ "$LINKED" = "1" ]; then
+  echo "PASS - misma cuenta a 2 voluntarios en paralelo -> ok + account_in_use, 1 solo vinculo"
+else
+  echo "FAIL - concurrencia link: $R3 vinculos=$LINKED (esperado 'ok,|account_in_use,' y 1)"; CONC_STATUS=1
 fi
 
 echo
