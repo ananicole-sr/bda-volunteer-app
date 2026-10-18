@@ -1,4 +1,18 @@
-# Pruebas de `002_nfc_security.sql`
+# Pruebas de `002_nfc_security.sql` y `003_volunteer_management.sql`
+
+`run_tests.sh` aplica 002 y 003 y corre `10_test_cases.sql` (002) y
+`20_volunteer_management_cases.sql` (003, imprime su propia tabla y resumen).
+
+En Linux con PostgreSQL 16 instalado (sin tocar el servicio del sistema), un
+cluster desechable equivalente al de abajo:
+
+```bash
+B=/usr/lib/postgresql/16/bin
+$B/initdb -D /tmp/pgdata-bamx -U postgres -A trust -E UTF8 --locale=C
+$B/pg_ctl -D /tmp/pgdata-bamx -o "-p 5433 -c listen_addresses=127.0.0.1 -c unix_socket_directories=''" -l /tmp/pg-bamx.log start
+PGPORT=5433 bash supabase/tests/run_tests.sh
+$B/pg_ctl -D /tmp/pgdata-bamx stop
+```
 
 Corren contra un Postgres **local**, nunca contra el proyecto de Supabase real.
 

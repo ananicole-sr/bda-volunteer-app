@@ -2,9 +2,21 @@
 import { assert, assertEquals } from "jsr:@std/assert@1";
 import { uidHmac } from "./hmac.ts";
 import { createHandler, type Deps, type RpcResult } from "./handler.ts";
-import { checkInSpec, enrollVolunteerSpec, issueCardSpec } from "./specs.ts";
+import {
+  checkInSpec,
+  deactivateVolunteerSpec,
+  enrollVolunteerSpec,
+  issueCardSpec,
+  updateVolunteerSpec,
+} from "./specs.ts";
 import { normalizeUid } from "./uid.ts";
-import { parseCheckIn, parseEnroll, parseIssueCard } from "./validate.ts";
+import {
+  parseCheckIn,
+  parseDeactivateVolunteer,
+  parseEnroll,
+  parseIssueCard,
+  parseUpdateVolunteer,
+} from "./validate.ts";
 
 // ---------------------------------------------------------------- UID
 Deno.test("normalizeUid: mayusculas, sin separadores, longitudes 8/14/20", () => {
@@ -242,4 +254,164 @@ Deno.test("los logs de error no incluyen UID ni secreto", async () => {
   }
   assert(logged.length > 0);
   for (const l of logged) assert(!/04A1B2C3|vector-secret-123/i.test(l), l);
+});
+
+// ---------------------------------------------------------------- update-volunteer / deactivate-volunteer
+const VID = "0A1B2C3D-1111-2222-3333-444455556666";
+const vid = VID.toLowerCase();
+
+Deno.test("parseUpdateVolunteer: parcial o completo, recorta y descarta campos ajenos", () => {
+  const onlyName = parseUpdateVolunteer({ volunteer_id: VID, full_name: "  Ana  " });
+  assert(onlyName.ok);
+  assertEquals(onlyName.value, { volunteer_id: vid, full_name: "Ana" });
+
+  const onlyCommunity = parseUpdateVolunteer({ volunteer_id: VID, community: "Centro" });
+  assert(onlyCommunity.ok);
+  assertEquals(onlyCommunity.value, { volunteer_id: vid, community: "Centro" });
+
+  const both = parseUpdateVolunteer({
+    volunteer_id: VID, full_name: "Ana", community: "x".repeat(120),
+    points: 9999, is_active: true, uid: "04A1B2C3", operator_id: "x",
+  });
+  assert(both.ok);
+  assertEquals(both.value, { volunteer_id: vid, full_name: "Ana", community: "x".repeat(120) });
+});
+
+Deno.test("parseUpdateVolunteer: rechaza cuerpos invalidos", () => {
+  for (const bad of [
+    null, [], "x",
+    { volunteer_id: VID },                                 // nada que cambiar
+    { full_name: "Ana" },                                  // sin volunteer_id
+    { volunteer_id: "123", full_name: "Ana" },
+    { volunteer_id: VID, full_name: "" },
+    { volunteer_id: VID, full_name: "   " },
+    { volunteer_id: VID, full_name: "x".repeat(121) },
+    { volunteer_id: VID, full_name: null },                // null no es "no cambiar"
+    { volunteer_id: VID, community: 5 },
+    { volunteer_id: VID, full_name: "Ana", community: "" }, // un campo malo invalida todo
+  ]) assertEquals(parseUpdateVolunteer(bad).ok, false, JSON.stringify(bad));
+});
+
+Deno.test("parseDeactivateVolunteer: solo volunteer_id UUID", () => {
+  const r = parseDeactivateVolunteer({ volunteer_id: VID, is_active: true });
+  assert(r.ok);
+  assertEquals(r.value, { volunteer_id: vid });
+  for (const bad of [null, {}, { volunteer_id: "no-uuid" }, { volunteer_id: 1 }]) {
+    assertEquals(parseDeactivateVolunteer(bad).ok, false, JSON.stringify(bad));
+  }
+});
+
+const volunteerCases = [
+  { spec: updateVolunteerSpec, body: { volunteer_id: VID, full_name: "Ana" } },
+  { spec: deactivateVolunteerSpec, body: { volunteer_id: VID } },
+] as const;
+
+Deno.test("update/deactivate-volunteer: 401 sin token o con token invalido, sin llamar RPC", async () => {
+  for (const { spec, body } of volunteerCases) {
+    const f = fake();
+    const h = createHandler(spec as typeof updateVolunteerSpec, f.deps);
+    for (const r of [req(body, null), req(body, "bad-token")]) {
+      const res = await h(r);
+      assertEquals(res.status, 401, spec.name);
+      assertEquals(await res.json(), { code: "unauthorized" });
+    }
+    assertEquals(f.calls.length, 0);
+  }
+});
+
+Deno.test("update/deactivate-volunteer: 403 para guard, volunteer y sin profile (solo admin)", async () => {
+  for (const { spec, body } of volunteerCases) {
+    for (const role of ["guard", "volunteer", null]) {
+      const f = fake({ role });
+      const res = await createHandler(spec as typeof updateVolunteerSpec, f.deps)(req(body));
+      assertEquals(res.status, 403, `${spec.name} role=${role}`);
+      assertEquals(await res.json(), { code: "forbidden" });
+      assertEquals(f.calls.length, 0);
+    }
+  }
+});
+
+Deno.test("update/deactivate-volunteer: el rol se revisa antes que el cuerpo (403, no 400)", async () => {
+  for (const { spec } of volunteerCases) {
+    const res = await createHandler(spec as typeof updateVolunteerSpec, fake({ role: "guard" }).deps)(req({}));
+    assertEquals(res.status, 403, spec.name);
+  }
+});
+
+Deno.test("update/deactivate-volunteer: 400 invalid_request con cuerpo invalido, sin llamar RPC", async () => {
+  for (const { spec } of volunteerCases) {
+    const f = fake();
+    const h = createHandler(spec as typeof updateVolunteerSpec, f.deps);
+    for (const r of [req({ volunteer_id: "123" }), req("{no json"), req({}, "good-token", "GET")]) {
+      const res = await h(r);
+      assertEquals(res.status, 400, spec.name);
+      assertEquals((await res.json()).code, "invalid_request");
+    }
+    assertEquals(f.calls.length, 0);
+  }
+  const res = await createHandler(updateVolunteerSpec, fake().deps)(req({ volunteer_id: VID }));
+  assertEquals(res.status, 400);
+  assertEquals((await res.json()).message, "se requiere full_name o community");
+});
+
+Deno.test("update-volunteer: RPC con operator_id del JWT, null en lo que no cambia, sin campos ajenos", async () => {
+  const f = fake({ user: "admin-1" });
+  const h = createHandler(updateVolunteerSpec, f.deps);
+  await h(req({ volunteer_id: VID, community: " Centro ", operator_id: "hacker", points: 1, is_active: false }));
+  await h(req({ volunteer_id: VID, full_name: "Ana", community: "Zapopan" }));
+  assertEquals(f.calls, [
+    {
+      fn: "update_volunteer",
+      args: { p_volunteer_id: vid, p_full_name: null, p_community: "Centro", p_operator_id: "admin-1" },
+    },
+    {
+      fn: "update_volunteer",
+      args: { p_volunteer_id: vid, p_full_name: "Ana", p_community: "Zapopan", p_operator_id: "admin-1" },
+    },
+  ]);
+});
+
+Deno.test("deactivate-volunteer: RPC con operator_id del JWT, ignora operator_id del body", async () => {
+  const f = fake({ user: "admin-1" });
+  await createHandler(deactivateVolunteerSpec, f.deps)(req({ volunteer_id: VID, operator_id: "hacker" }));
+  assertEquals(f.calls, [{ fn: "deactivate_volunteer", args: { p_volunteer_id: vid, p_operator_id: "admin-1" } }]);
+});
+
+Deno.test("update/deactivate-volunteer: no requieren CARD_UID_HMAC_SECRET", async () => {
+  for (const { spec, body } of volunteerCases) {
+    const f = fake({ secret: undefined });
+    const res = await createHandler(spec as typeof updateVolunteerSpec, f.deps)(req(body));
+    assertEquals(res.status, 200, spec.name);
+    assertEquals(f.calls.length, 1);
+  }
+});
+
+Deno.test("update/deactivate-volunteer: 200 pasa tal cual ok y volunteer_not_found", async () => {
+  for (const data of [
+    { code: "ok", changed_fields: ["full_name"], volunteer: { id: vid, full_name: "Ana", community: "C", is_active: true } },
+    { code: "ok", already_inactive: true, volunteer: { id: vid, full_name: "Ana", is_active: false } },
+    { code: "volunteer_not_found", message: "El voluntario no existe" },
+  ]) {
+    for (const { spec, body } of volunteerCases) {
+      const res = await createHandler(spec as typeof updateVolunteerSpec, fake({ rpc: { data, error: null } }).deps)(req(body));
+      assertEquals(res.status, 200);
+      assertEquals(await res.json(), data);
+    }
+  }
+});
+
+Deno.test("update/deactivate-volunteer: 500 generico ante error de RPC o forma inesperada", async () => {
+  const origError = console.error;
+  console.error = () => {};
+  try {
+    for (const rpc of [{ data: null, error: { code: "22023" } }, { data: "x", error: null }]) {
+      for (const { spec, body } of volunteerCases) {
+        const res = await createHandler(spec as typeof updateVolunteerSpec, fake({ rpc }).deps)(req(body));
+        assertEquals(res.status, 500);
+        assertEquals(await res.json(), { code: "server_error" });
+      }
+    }
+  } finally {
+    console.error = origError;
+  }
 });

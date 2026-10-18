@@ -21,6 +21,20 @@ El cliente normaliza antes de enviar; el servidor vuelve a normalizar y rechaza 
    Request:  { volunteer_id: uuid, uid: string }
    Response: { code, message?, card_id?: uuid, revoked_previous?: boolean }
    Códigos: ok | card_in_use | volunteer_not_found
+4) update-volunteer (rol: admin) — SQL: update_volunteer (supabase/003_volunteer_management.sql)
+   Request:  { volunteer_id: uuid, full_name?: string (1-120), community?: string (1-120) }
+             Al menos uno de full_name / community. Omitido = no cambiar; null es inválido.
+             Cualquier otro campo (points, is_active, uid...) se ignora.
+   Response: { code, message?, changed_fields?: ('full_name'|'community')[],
+               volunteer?: { id, full_name, community, is_active } }
+   Códigos: ok | volunteer_not_found
+   changed_fields vacío = los valores ya eran esos (no se escribe ni se audita).
+5) deactivate-volunteer (rol: admin) — SQL: deactivate_volunteer (supabase/003_volunteer_management.sql)
+   Request:  { volunteer_id: uuid }
+   Response: { code, message?, already_inactive?: boolean, volunteer?: { id, full_name, is_active: false } }
+   Códigos: ok | volunteer_not_found
+   Idempotente. No revoca la tarjeta: el check-in de un voluntario inactivo responde volunteer_inactive.
+   No hay reactivación todavía.
 
 ## HTTP
 200 para todos los códigos de negocio (incluidos los de error de negocio).

@@ -79,6 +79,52 @@ export function parseEnroll(body: unknown): Parsed<EnrollBody> {
   return { ok: true, value: { full_name: full_name.value, community: community.value, uid } };
 }
 
+/** volunteer_id valido o el mensaje de error. */
+function volunteerId(v: unknown): { value: string } | { ok: false; message: string } {
+  if (typeof v !== "string" || !UUID_ANY.test(v)) return fail("volunteer_id debe ser un UUID");
+  return { value: v.toLowerCase() };
+}
+
+export interface UpdateVolunteerBody {
+  volunteer_id: string;
+  full_name?: string; // ausente = no cambiar
+  community?: string; // ausente = no cambiar
+}
+
+export function parseUpdateVolunteer(body: unknown): Parsed<UpdateVolunteerBody> {
+  const b = asRecord(body);
+  if (!b) return fail("el cuerpo debe ser un objeto JSON");
+  const id = volunteerId(b.volunteer_id);
+  if ("ok" in id) return id;
+  const value: UpdateVolunteerBody = { volunteer_id: id.value };
+  if (b.full_name !== undefined) {
+    const full_name = text(b.full_name, "full_name", 120);
+    if ("ok" in full_name) return full_name;
+    value.full_name = full_name.value;
+  }
+  if (b.community !== undefined) {
+    const community = text(b.community, "community", 120);
+    if ("ok" in community) return community;
+    value.community = community.value;
+  }
+  if (value.full_name === undefined && value.community === undefined) {
+    return fail("se requiere full_name o community");
+  }
+  return { ok: true, value };
+}
+
+export interface DeactivateVolunteerBody {
+  volunteer_id: string;
+}
+
+export function parseDeactivateVolunteer(body: unknown): Parsed<DeactivateVolunteerBody> {
+  const b = asRecord(body);
+  if (!b) return fail("el cuerpo debe ser un objeto JSON");
+  const id = volunteerId(b.volunteer_id);
+  if ("ok" in id) return id;
+  return { ok: true, value: { volunteer_id: id.value } };
+}
+
 export interface IssueCardBody {
   volunteer_id: string;
   uid: string;

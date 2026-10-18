@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # ============================================================================
-# Corre las pruebas de supabase/002_nfc_security.sql contra un Postgres
+# Corre las pruebas de supabase/002_nfc_security.sql y
+# supabase/003_volunteer_management.sql contra un Postgres
 # local (no contra el proyecto de Supabase real).
 #
 # Variables de entorno opcionales:
@@ -51,7 +52,9 @@ prepare_db "$TESTDB"
   -f "$SCRIPT_DIR/00b_set_test_secret.sql" \
   -f "$SUPABASE_DIR/schema.sql" \
   -f "$SUPABASE_DIR/002_nfc_security.sql" \
-  -f "$SCRIPT_DIR/10_test_cases.sql"
+  -f "$SUPABASE_DIR/003_volunteer_management.sql" \
+  -f "$SCRIPT_DIR/10_test_cases.sql" \
+  -f "$SCRIPT_DIR/20_volunteer_management_cases.sql"
 MAIN_STATUS=$?
 
 echo

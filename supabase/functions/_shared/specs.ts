@@ -1,11 +1,15 @@
 import type { FunctionSpec } from "./handler.ts";
 import {
   type CheckInBody,
+  type DeactivateVolunteerBody,
   type EnrollBody,
   type IssueCardBody,
   parseCheckIn,
+  parseDeactivateVolunteer,
   parseEnroll,
   parseIssueCard,
+  parseUpdateVolunteer,
+  type UpdateVolunteerBody,
 } from "./validate.ts";
 
 export const checkInSpec: FunctionSpec<CheckInBody> = {
@@ -46,5 +50,30 @@ export const issueCardSpec: FunctionSpec<IssueCardBody> = {
   toRpc: (b, hmac, operatorId) => ({
     fn: "issue_card",
     args: { p_volunteer_id: b.volunteer_id, p_uid_hmac: hmac, p_operator_id: operatorId },
+  }),
+};
+
+export const updateVolunteerSpec: FunctionSpec<UpdateVolunteerBody> = {
+  name: "update-volunteer",
+  roles: ["admin"],
+  parse: parseUpdateVolunteer,
+  toRpc: (b, _hmac, operatorId) => ({
+    fn: "update_volunteer",
+    args: {
+      p_volunteer_id: b.volunteer_id,
+      p_full_name: b.full_name ?? null,
+      p_community: b.community ?? null,
+      p_operator_id: operatorId,
+    },
+  }),
+};
+
+export const deactivateVolunteerSpec: FunctionSpec<DeactivateVolunteerBody> = {
+  name: "deactivate-volunteer",
+  roles: ["admin"],
+  parse: parseDeactivateVolunteer,
+  toRpc: (b, _hmac, operatorId) => ({
+    fn: "deactivate_volunteer",
+    args: { p_volunteer_id: b.volunteer_id, p_operator_id: operatorId },
   }),
 };
