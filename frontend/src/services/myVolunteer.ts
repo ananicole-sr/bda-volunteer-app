@@ -1,5 +1,8 @@
+import { pageRange, toPage } from '@/lib/pagination';
 import { supabase } from '@/lib/supabase';
+import { mapRequestRow, REQUEST_SELECT } from '@/services/redemptions';
 import { formatLastVisit } from '@/services/volunteers';
+import type { RedemptionRequest } from '@/types/redemption';
 import type {
   MyCheckIn,
   MyRedemption,
@@ -33,8 +36,7 @@ export class VolunteerAccountError extends Error {
   }
 }
 
-export const DEFAULT_PAGE_SIZE = 20;
-export const MAX_PAGE_SIZE = 50;
+export { DEFAULT_PAGE_SIZE, MAX_PAGE_SIZE } from '@/lib/pagination';
 
 const PROFILE_COLUMNS =
   'id, full_name, community, avatar_url, points, total_visits, last_check_in_at, is_active';
@@ -69,18 +71,6 @@ async function myVolunteerId(): Promise<string> {
   }
   if (!data) throw notLinked();
   return data.id as string;
-}
-
-function pageRange({ page = 1, pageSize = DEFAULT_PAGE_SIZE }: PageOptions = {}) {
-  const p = Math.max(1, Math.floor(Number.isFinite(page) ? page : 1));
-  const size = Math.min(MAX_PAGE_SIZE, Math.max(1, Math.floor(Number.isFinite(pageSize) ? pageSize : DEFAULT_PAGE_SIZE)));
-  const from = (p - 1) * size;
-  return { page: p, pageSize: size, from, to: from + size - 1 };
-}
-
-function toPage<T>(items: T[], total: number | null, r: { page: number; pageSize: number; from: number }): Page<T> {
-  const t = total ?? items.length;
-  return { items, page: r.page, pageSize: r.pageSize, total: t, hasMore: r.from + items.length < t };
 }
 
 /** Perfil y saldo de puntos del voluntario con sesion iniciada. */
@@ -160,4 +150,25 @@ export async function getMyRedemptions(options?: PageOptions): Promise<Page<MyRe
     };
   });
   return toPage(items, count, r);
+}
+
+/**
+ * Solicitudes de canje propias (con estado de entrega y sus renglones), de la
+ * mas reciente a la mas antigua. Los canjes previos a 006 no tienen solicitud:
+ * siguen apareciendo solo en getMyRedemptions().
+ */
+export async function getMyRedemptionRequests(options?: PageOptions): Promise<Page<RedemptionRequest>> {
+  const volunteerId = await myVolunteerId();
+  const r = pageRange(options);
+  const { data, error, count } = await supabase
+    .from('redemption_requests')
+    .select(REQUEST_SELECT, { count: 'exact' })
+    .eq('volunteer_id', volunteerId)
+    .order('created_at', { ascending: false })
+    .range(r.from, r.to);
+
+  if (error) {
+    throw new Error(`No se pudieron cargar tus solicitudes de canje: ${error.message}`);
+  }
+  return toPage((data ?? []).map(mapRequestRow), count, r);
 }

@@ -1,10 +1,15 @@
-# Pruebas de las migraciones 002 a 005
+# Pruebas de las migraciones 002 a 006
 
-`run_tests.sh` aplica 002, 003, 004 y 005 y corre `10_test_cases.sql` (002),
+`run_tests.sh` aplica 002 a 006 y corre `10_test_cases.sql` (002),
 `20_volunteer_management_cases.sql` (003), `30_rewards_management_cases.sql`
-(004) y `40_volunteer_accounts_cases.sql` (005); cada archivo imprime su
-propia tabla y resumen. La seccion [1c] prueba en paralelo que una misma
-cuenta no quede vinculada a dos voluntarios.
+(004), `40_volunteer_accounts_cases.sql` (005) y `50_redemptions_cases.sql`
+(006); cada archivo imprime su propia tabla y resumen. Secciones extra:
+[1c] misma cuenta vinculada en paralelo; [1d] canjes en paralelo (saldo,
+ultima unidad de stock, mismo request_id); [2c] aplicar 006 sobre canjes
+previos no los marca como pendientes.
+
+Ojo: si `10_test_cases.sql` falla, psql se detiene ahi (ON_ERROR_STOP) y los
+archivos siguientes no corren.
 
 En Linux con PostgreSQL 16 instalado (sin tocar el servicio del sistema), un
 cluster desechable equivalente al de abajo:

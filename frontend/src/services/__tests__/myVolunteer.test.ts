@@ -1,6 +1,7 @@
 /// <reference types="jest" />
 import {
   getMyCheckIns,
+  getMyRedemptionRequests,
   getMyRedemptions,
   getMyVolunteerProfile,
   VolunteerAccountError,
@@ -172,5 +173,36 @@ describe('getMyRedemptions', () => {
   it('sin sesion -> not_authenticated', async () => {
     mockGetSession.mockResolvedValue({ data: { session: null }, error: null });
     expect((await errorOf(getMyRedemptions())).code).toBe('not_authenticated');
+  });
+});
+
+describe('getMyRedemptionRequests', () => {
+  it('filtra por el voluntario de la sesion y mapea estado y renglones', async () => {
+    mockResults.push({ data: { id: VOL }, error: null });
+    mockResults.push({
+      data: [{
+        id: 'q1', client_request_id: 'c', status: 'delivered', total_points: 300,
+        created_at: '2026-10-18T20:00:00Z', delivered_at: '2026-10-19T15:00:00Z',
+        items: [{ reward_id: 'w1', points_spent: 300, reward: { name: 'Despensa' } }],
+      }],
+      error: null,
+      count: 1,
+    });
+
+    const page = await getMyRedemptionRequests();
+
+    expect(mockQueries.map((q) => q.table)).toEqual(['volunteers', 'redemption_requests']);
+    expect(mockQueries[1].calls).toContainEqual(['eq', 'volunteer_id', VOL]);
+    expect(page.items).toEqual([{
+      id: 'q1', clientRequestId: 'c', status: 'delivered', totalPoints: 300,
+      createdAt: '2026-10-18T20:00:00Z', deliveredAt: '2026-10-19T15:00:00Z',
+      items: [{ rewardId: 'w1', name: 'Despensa', pointsSpent: 300 }],
+    }]);
+  });
+
+  it('sin vinculo -> not_linked sin consultar solicitudes', async () => {
+    mockResults.push({ data: null, error: null });
+    expect((await errorOf(getMyRedemptionRequests())).code).toBe('not_linked');
+    expect(mockQueries.map((q) => q.table)).toEqual(['volunteers']);
   });
 });

@@ -263,3 +263,75 @@ export function parseLinkVolunteerAccount(body: unknown): Parsed<LinkVolunteerAc
   if ("ok" in uid) return uid;
   return { ok: true, value: { volunteer_id: vid.value, user_id: uid.value } };
 }
+
+// ---------------------------------------------------------------- canjes y notificaciones
+
+/** Maximo de recompensas distintas por solicitud (igual que redemption_max_items() en SQL). */
+export const REDEMPTION_MAX_ITEMS = 20;
+/** Maximo de notificaciones por llamada a mark-notifications-read. */
+export const NOTIFICATIONS_MAX_IDS = 100;
+
+/** Arreglo de 1..max UUIDs, en minusculas; con `unique`, rechaza repetidos. */
+function uuidList(
+  v: unknown,
+  field: string,
+  max: number,
+  unique: boolean,
+): { value: string[] } | { ok: false; message: string } {
+  if (!Array.isArray(v) || v.length === 0) return fail(`${field} debe ser un arreglo no vacio`);
+  if (v.length > max) return fail(`${field} admite maximo ${max} elementos`);
+  const out: string[] = [];
+  for (const item of v) {
+    const id = uuidField(item, field);
+    if ("ok" in id) return fail(`${field} debe contener solo UUIDs`);
+    out.push(id.value);
+  }
+  const distinct = [...new Set(out)];
+  if (unique && distinct.length !== out.length) return fail(`${field} no puede repetir ids`);
+  return { value: distinct };
+}
+
+export interface RedeemRewardsBody {
+  client_request_id: string; // UUID v4 que genera el cliente; reusarlo en los reintentos
+  reward_ids: string[]; // 1 unidad de cada una
+}
+
+export function parseRedeemRewards(body: unknown): Parsed<RedeemRewardsBody> {
+  const b = asRecord(body);
+  if (!b) return fail("el cuerpo debe ser un objeto JSON");
+  if (typeof b.client_request_id !== "string" || !UUID_V4.test(b.client_request_id)) {
+    return fail("client_request_id debe ser un UUID v4");
+  }
+  const ids = uuidList(b.reward_ids, "reward_ids", REDEMPTION_MAX_ITEMS, true);
+  if ("ok" in ids) return ids;
+  return { ok: true, value: { client_request_id: b.client_request_id.toLowerCase(), reward_ids: ids.value } };
+}
+
+export interface MarkRedemptionDeliveredBody {
+  request_id: string; // redemption_requests.id
+}
+
+export function parseMarkRedemptionDelivered(body: unknown): Parsed<MarkRedemptionDeliveredBody> {
+  const b = asRecord(body);
+  if (!b) return fail("el cuerpo debe ser un objeto JSON");
+  const id = uuidField(b.request_id, "request_id");
+  if ("ok" in id) return id;
+  return { ok: true, value: { request_id: id.value } };
+}
+
+export interface MarkNotificationsReadBody {
+  notification_ids: string[] | null; // null = todas
+}
+
+export function parseMarkNotificationsRead(body: unknown): Parsed<MarkNotificationsReadBody> {
+  const b = asRecord(body);
+  if (!b) return fail("el cuerpo debe ser un objeto JSON");
+  const hasIds = b.notification_ids !== undefined;
+  const all = b.all === true;
+  if (b.all !== undefined && b.all !== true) return fail("all solo admite true");
+  if (hasIds === all) return fail("manda notification_ids o all: true (uno de los dos)");
+  if (all) return { ok: true, value: { notification_ids: null } };
+  const ids = uuidList(b.notification_ids, "notification_ids", NOTIFICATIONS_MAX_IDS, false);
+  if ("ok" in ids) return ids;
+  return { ok: true, value: { notification_ids: ids.value } };
+}
