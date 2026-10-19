@@ -11,6 +11,7 @@ import {
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
 import { getMyRole, routeForRole, type AppRole } from '@/services/profile';
+import AppHeader from '@/components/common/AppHeader';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -58,6 +59,7 @@ export default function LoginScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       className="flex-1 bg-zinc-50"
     >
+      <AppHeader />
       <View className="flex-1 justify-center px-6">
         <View className="mb-8">
           <Text className="text-3xl font-black tracking-tight text-zinc-900">RED BAMX</Text>

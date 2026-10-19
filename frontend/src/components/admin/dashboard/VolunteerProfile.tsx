@@ -6,16 +6,18 @@ import {
   TouchableOpacity,
 } from 'react-native';
 
-import type { Volunteer } from '@/types/volunteer';
+import type { Volunteer, VolunteerCheckIn } from '@/types/volunteer';
 
 interface VolunteerProfileProps {
   volunteer: Volunteer;
   onEdit: () => void;
+  visits: VolunteerCheckIn[];
 }
 
 export default function VolunteerProfile({
   volunteer,
   onEdit,
+  visits,
 }: VolunteerProfileProps) {
   return (
     <View>
@@ -114,6 +116,21 @@ export default function VolunteerProfile({
             {volunteer.community}
           </Text>
         </View>
+      </View>
+
+      <View className="mt-4 rounded-2xl border border-zinc-200 bg-white p-4">
+        <Text className="mb-3 text-sm font-extrabold text-zinc-900">Historial de visitas</Text>
+        {visits.length === 0 ? (
+          <Text className="text-sm text-[#666665]">Aún no hay visitas registradas.</Text>
+        ) : visits.map((visit) => (
+          <View key={visit.id} className="mb-2 flex-row items-center justify-between rounded-xl bg-[#f4f4f2] px-3 py-2.5">
+            <View>
+              <Text className="text-sm font-bold text-zinc-900">Visita {visit.visitNumber ?? '—'}</Text>
+              <Text className="mt-0.5 text-xs text-[#666665]">{new Date(visit.checkedInAt).toLocaleString('es-MX')}</Text>
+            </View>
+            <Text className="text-sm font-extrabold text-[#218750]">+{visit.pointsAwarded} pts</Text>
+          </View>
+        ))}
       </View>
     </View>
   );

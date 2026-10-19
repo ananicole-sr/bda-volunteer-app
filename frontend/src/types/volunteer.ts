@@ -92,6 +92,9 @@ export interface MyCheckIn {
   status: 'valid' | 'duplicate' | 'rejected';
 }
 
+/** Visita visible para personal autorizado; no incluye datos de la tarjeta. */
+export interface VolunteerCheckIn extends MyCheckIn {}
+
 export interface MyRedemption {
   id: string;
   redeemedAt: string;
