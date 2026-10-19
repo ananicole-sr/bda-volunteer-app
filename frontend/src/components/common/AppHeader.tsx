@@ -13,12 +13,8 @@ export default function AppHeader({ showSignOut = false }: AppHeaderProps) {
       className="flex-row items-center justify-between border-b border-zinc-200 bg-white px-4 pb-3"
       style={{ paddingTop: insets.top + 12 }}
     >
-      {/* aspectRatio = proporcion real de logo.png (546x406), para que no quede espacio vacio a los lados */}
-      <Image
-        source={require('frontend/assets/logo.png')}
-        style={{ height: 72, aspectRatio: 546 / 406 }}
-        resizeMode="contain"
-      />
+      {/* Ancho y alto fijos con la proporcion de logo.png (546x406): sin espacio vacio a los lados. */}
+      <Image source={require('frontend/assets/logo.png')} style={{ width: 97, height: 72 }} resizeMode="contain" />
       {showSignOut ? <SignOutButton /> : null}
     </View>
   );
