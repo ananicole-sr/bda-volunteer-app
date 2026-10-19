@@ -40,7 +40,7 @@ export default function AdminLayout() {
 
   return (
     <View className="flex-1 bg-[#f4f4f2]">
-      <View className="pt-8 pb-2">
+      <View className="pb-2">
         <AdminHeader />
       </View>
       <View className="flex-1">
