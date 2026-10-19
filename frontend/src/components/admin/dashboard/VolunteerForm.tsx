@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useState } from 'react';
 
 import {
   View,
@@ -6,14 +6,37 @@ import {
   TextInput,
   TouchableOpacity,
 } from 'react-native';
+import { createRegistrationRequestId, registerVolunteerAccount } from '@/services/volunteers';
+import type { RegisterVolunteerAccountInput } from '@/types/volunteer';
 
 interface VolunteerFormProps {
   submitLabel?: string;
+  onRegistered: (volunteerId: string) => void;
 }
 
 export default function VolunteerForm({
   submitLabel = 'Registrar voluntario',
+  onRegistered,
 }: VolunteerFormProps) {
+  const [form, setForm] = useState({ fullName: '', community: '', uid: '', email: '', password: '' });
+  const [clientRequestId, setClientRequestId] = useState<string | null>(null);
+  const [error, setError] = useState('');
+  const [submitting, setSubmitting] = useState(false);
+
+  const submit = async () => {
+    if (!form.fullName.trim() || !form.community.trim() || !form.uid.trim() || !form.email.trim() || !form.password) {
+      setError('Completa todos los campos requeridos.'); return;
+    }
+    const requestId = clientRequestId ?? createRegistrationRequestId();
+    setClientRequestId(requestId); setError(''); setSubmitting(true);
+    try {
+      const input: RegisterVolunteerAccountInput = { clientRequestId: requestId, fullName: form.fullName.trim(), community: form.community.trim(), uid: form.uid.trim(), email: form.email.trim(), password: form.password };
+      const result = await registerVolunteerAccount(input);
+      if (result.code === 'ok') onRegistered(result.volunteer.id);
+      else setError(result.message ?? 'No se pudo registrar el voluntario.');
+    } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo registrar el voluntario. Intenta de nuevo.'); }
+    finally { setSubmitting(false); }
+  };
   return (
     <View>
       <View className="rounded-2xl border border-zinc-200 bg-white p-5">
@@ -29,7 +52,8 @@ export default function VolunteerForm({
           <TextInput
             placeholder="Ej. Sofía Ramírez"
             placeholderTextColor="#a0a09e"
-            editable={false}
+            value={form.fullName}
+            onChangeText={(fullName) => setForm((current) => ({ ...current, fullName }))}
             className="rounded-xl border border-zinc-200 bg-[#f4f4f2] px-4 py-3.5 text-sm text-zinc-900"
           />
         </View>
@@ -42,7 +66,8 @@ export default function VolunteerForm({
           <TextInput
             placeholder="Ej. Zapopan"
             placeholderTextColor="#a0a09e"
-            editable={false}
+            value={form.community}
+            onChangeText={(community) => setForm((current) => ({ ...current, community }))}
             className="rounded-xl border border-zinc-200 bg-[#f4f4f2] px-4 py-3.5 text-sm text-zinc-900"
           />
         </View>
@@ -55,7 +80,8 @@ export default function VolunteerForm({
           <TextInput
             placeholder="UID de tarjeta NFC"
             placeholderTextColor="#a0a09e"
-            editable={false}
+            value={form.uid}
+            onChangeText={(uid) => setForm((current) => ({ ...current, uid }))}
             autoCapitalize="characters"
             className="rounded-xl border border-zinc-200 bg-[#f4f4f2] px-4 py-3.5 text-sm text-zinc-900"
           />
@@ -65,31 +91,14 @@ export default function VolunteerForm({
           </Text>
         </View>
 
+        <View className="mb-5">
+          <Text className="mb-2 text-xs font-bold text-[#666665]">Correo de acceso</Text>
+          <TextInput value={form.email} onChangeText={(email) => setForm((current) => ({ ...current, email }))} autoCapitalize="none" keyboardType="email-address" placeholder="voluntario@ejemplo.com" placeholderTextColor="#a0a09e" className="rounded-xl border border-zinc-200 bg-white px-4 py-3.5 text-sm text-zinc-900" />
+        </View>
         <View>
-          <Text className="mb-2 text-xs font-bold text-[#666665]">
-            Foto de perfil
-          </Text>
-
-          <View className="items-center rounded-xl border border-dashed border-zinc-300 bg-[#f4f4f2] px-4 py-6">
-            <View className="h-16 w-16 items-center justify-center rounded-full bg-zinc-200">
-              <Text className="text-xl font-extrabold text-zinc-400">
-                +
-              </Text>
-            </View>
-
-            <TouchableOpacity
-              disabled
-              className="mt-3 rounded-xl border border-[#e88e29] px-4 py-2 opacity-60"
-            >
-              <Text className="text-xs font-bold text-[#e88e29]">
-                Seleccionar foto
-              </Text>
-            </TouchableOpacity>
-
-            <Text className="mt-2 text-center text-[10px] text-[#666665]">
-              La carga de imágenes se habilitará posteriormente.
-            </Text>
-          </View>
+          <Text className="mb-2 text-xs font-bold text-[#666665]">Contraseña inicial</Text>
+          <TextInput value={form.password} onChangeText={(password) => setForm((current) => ({ ...current, password }))} secureTextEntry placeholder="Mínimo 8 caracteres" placeholderTextColor="#a0a09e" className="rounded-xl border border-zinc-200 bg-white px-4 py-3.5 text-sm text-zinc-900" />
+          <Text className="mt-1.5 text-[10px] text-[#666665]">La contraseña se envía solo a Supabase Auth y no se guarda en la app.</Text>
         </View>
       </View>
 
@@ -139,12 +148,10 @@ export default function VolunteerForm({
         </View>
       </View>
 
-      <TouchableOpacity
-        disabled
-        className="mt-5 items-center rounded-xl bg-[#e88e29] py-4 opacity-50"
-      >
+      {error ? <Text className="mt-4 text-xs font-semibold text-red-600">{error}</Text> : null}
+      <TouchableOpacity disabled={submitting} onPress={submit} className={`mt-5 items-center rounded-xl bg-[#e88e29] py-4 ${submitting ? 'opacity-60' : ''}`}>
         <Text className="text-sm font-bold text-white">
-          {submitLabel}
+          {submitting ? 'Registrando…' : submitLabel}
         </Text>
       </TouchableOpacity>
 

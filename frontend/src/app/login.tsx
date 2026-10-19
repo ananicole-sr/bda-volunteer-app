@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { useRouter } from 'expo-router';
 import { supabase } from '@/lib/supabase';
+import { getMyRole, routeForRole, type AppRole } from '@/services/profile';
 
 export default function LoginScreen() {
   const router = useRouter();
@@ -17,6 +18,7 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [errorMessage, setErrorMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [selectedRole, setSelectedRole] = useState<AppRole>('admin');
 
   const handleLogin = async () => {
     setErrorMessage('');
@@ -38,7 +40,17 @@ export default function LoginScreen() {
       return;
     }
 
-    router.replace('/admin');
+    try {
+      const role = await getMyRole();
+      if (!role) {
+        setErrorMessage('Tu cuenta no tiene un rol asignado. Contacta a un administrador.');
+        await supabase.auth.signOut();
+        return;
+      }
+      router.replace(routeForRole(role) as never);
+    } catch (roleError) {
+      setErrorMessage(roleError instanceof Error ? roleError.message : 'No se pudo verificar tu rol.');
+    }
   };
 
   return (
@@ -50,8 +62,18 @@ export default function LoginScreen() {
         <View className="mb-8">
           <Text className="text-3xl font-black tracking-tight text-zinc-900">RED BAMX</Text>
           <Text className="mt-2 text-sm font-semibold uppercase tracking-wider text-[#666665]">
-            Acceso administrador
+            Selecciona una vista y entra con tu cuenta
           </Text>
+        </View>
+
+        <View className="mb-6 flex-row gap-2">
+          {(['admin', 'guard', 'volunteer'] as AppRole[]).map((role) => (
+            <TouchableOpacity key={role} onPress={() => setSelectedRole(role)} className={`flex-1 rounded-xl px-2 py-3 ${selectedRole === role ? 'bg-[#e88e29]' : 'bg-white border border-zinc-200'}`}>
+              <Text className={`text-center text-xs font-bold ${selectedRole === role ? 'text-white' : 'text-[#666665]'}`}>
+                {role === 'admin' ? 'Admin' : role === 'guard' ? 'Guardia' : 'Voluntario'}
+              </Text>
+            </TouchableOpacity>
+          ))}
         </View>
 
         <View className="gap-4">
@@ -87,6 +109,8 @@ export default function LoginScreen() {
           {errorMessage ? (
             <Text className="text-sm font-semibold text-red-600">{errorMessage}</Text>
           ) : null}
+
+          <Text className="-mt-2 text-center text-xs text-[#666665]">La vista final se determina por el rol real de tu cuenta.</Text>
 
           <TouchableOpacity
             className="mt-2 items-center rounded-2xl bg-[#e88e29] py-4 active:opacity-90"

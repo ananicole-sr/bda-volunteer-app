@@ -10,6 +10,7 @@ import {
 import { useRouter } from 'expo-router';
 
 import RewardForm from '@/components/admin/rewards/RewardForm';
+import { createReward } from '@/services/rewards';
 
 export default function AddRewardScreen() {
   const router = useRouter();
@@ -42,7 +43,7 @@ export default function AddRewardScreen() {
         </Text>
       </View>
 
-      <RewardForm buttonLabel="Agregar recompensa" />
+      <RewardForm buttonLabel="Agregar recompensa" onSubmit={async (input) => { await createReward(input); router.replace('/admin/rewards'); }} />
     </ScrollView>
   );
 }
