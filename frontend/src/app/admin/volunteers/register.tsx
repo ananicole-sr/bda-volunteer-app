@@ -42,7 +42,7 @@ export default function RegisterVolunteerScreen() {
         </Text>
       </View>
 
-      <VolunteerForm />
+      <VolunteerForm onRegistered={(id) => router.replace(`/admin/volunteers/${id}` as never)} />
     </ScrollView>
   );
 }

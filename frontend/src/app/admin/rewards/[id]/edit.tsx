@@ -19,6 +19,7 @@ import {
 
 import RewardForm from '@/components/admin/rewards/RewardForm';
 import { getRewardById } from '@/services/rewards';
+import { updateReward } from '@/services/rewards';
 import type { Reward } from '@/types/reward';
 
 export default function EditRewardScreen() {
@@ -122,6 +123,7 @@ export default function EditRewardScreen() {
         points={reward.points}
         stock={reward.stock}
         buttonLabel="Guardar cambios"
+        onSubmit={async (input) => { const result = await updateReward(reward.id, input); if (result.code !== 'ok') throw new Error('La recompensa ya no existe.'); router.replace('/admin/rewards'); }}
       />
     </ScrollView>
   );
