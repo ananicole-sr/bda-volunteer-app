@@ -13,7 +13,7 @@ export default function AppHeader({ showSignOut = false }: AppHeaderProps) {
       className="flex-row items-center justify-between border-b border-zinc-200 bg-white px-5 pb-3"
       style={{ paddingTop: insets.top + 12 }}
     >
-      <Image source={require('frontend/assets/logo.png')} className="h-12 w-40" resizeMode="contain" />
+      <Image source={require('frontend/assets/logo.png')} className="h-16 w-56" resizeMode="contain" />
       {showSignOut ? <SignOutButton /> : null}
     </View>
   );
