@@ -10,10 +10,15 @@ export default function AppHeader({ showSignOut = false }: AppHeaderProps) {
 
   return (
     <View
-      className="flex-row items-center justify-between border-b border-zinc-200 bg-white px-5 pb-3"
+      className="flex-row items-center justify-between border-b border-zinc-200 bg-white px-4 pb-3"
       style={{ paddingTop: insets.top + 12 }}
     >
-      <Image source={require('frontend/assets/logo.png')} className="h-16 w-56" resizeMode="contain" />
+      {/* aspectRatio = proporcion real de logo.png (546x406), para que no quede espacio vacio a los lados */}
+      <Image
+        source={require('frontend/assets/logo.png')}
+        style={{ height: 72, aspectRatio: 546 / 406 }}
+        resizeMode="contain"
+      />
       {showSignOut ? <SignOutButton /> : null}
     </View>
   );
