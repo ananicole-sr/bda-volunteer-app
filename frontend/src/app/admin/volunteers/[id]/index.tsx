@@ -18,8 +18,8 @@ import {
 } from 'expo-router';
 
 import VolunteerProfile from '@/components/admin/dashboard/VolunteerProfile';
-import { getVolunteerById } from '@/services/volunteers';
-import type { Volunteer } from '@/types/volunteer';
+import { getVolunteerById, getVolunteerCheckIns } from '@/services/volunteers';
+import type { Volunteer, VolunteerCheckIn } from '@/types/volunteer';
 
 export default function VolunteerProfileScreen() {
   const router = useRouter();
@@ -27,6 +27,7 @@ export default function VolunteerProfileScreen() {
 
   const [volunteer, setVolunteer] =
     useState<Volunteer | null>(null);
+  const [visits, setVisits] = useState<VolunteerCheckIn[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -38,9 +39,9 @@ export default function VolunteerProfileScreen() {
       setLoading(true);
       setError(null);
 
-      const data = await getVolunteerById(id);
-
+      const [data, visitData] = await Promise.all([getVolunteerById(id), getVolunteerCheckIns(id)]);
       setVolunteer(data);
+      setVisits(visitData);
     } catch (err) {
       setError(
         err instanceof Error
@@ -110,6 +111,7 @@ export default function VolunteerProfileScreen() {
 
       <VolunteerProfile
         volunteer={volunteer}
+        visits={visits}
         onEdit={() =>
           router.push(
             `/admin/volunteers/${volunteer.id}/edit` as any

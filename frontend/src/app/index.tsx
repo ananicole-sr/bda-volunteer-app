@@ -1,6 +1,7 @@
 import React from 'react';
 import { View, Text, TouchableOpacity } from 'react-native';
 import { Href, useRouter } from 'expo-router';
+import AppHeader from '@/components/common/AppHeader';
 
 const loginRoute = '/login' as Href;
 
@@ -8,7 +9,9 @@ export default function HomeScreen() {
   const router = useRouter();
 
   return (
-    <View className="flex-1 justify-center items-center bg-zinc-50 px-6">
+    <View className="flex-1 bg-zinc-50">
+      <AppHeader />
+      <View className="flex-1 justify-center items-center px-6">
       <View className="items-center mb-8">
         <View className="flex-row items-center gap-2 mb-2">
           <Text className="text-3xl font-black text-zinc-900 tracking-tight">RED BAMX</Text>
@@ -23,6 +26,7 @@ export default function HomeScreen() {
         <Text className="text-white font-bold text-base">Entrar al admin</Text>
       </TouchableOpacity>
             
+      </View>
     </View>
   );
 }

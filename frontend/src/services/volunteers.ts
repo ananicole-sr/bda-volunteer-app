@@ -9,6 +9,7 @@ import type {
   UpdateVolunteerInput,
   UpdateVolunteerResult,
   Volunteer,
+  VolunteerCheckIn,
   VolunteerRow,
 } from '@/types/volunteer';
 
@@ -67,6 +68,26 @@ export async function getVolunteerById(
   }
 
   return mapRowToVolunteer(data as VolunteerRow);
+}
+
+/** Últimas asistencias de un voluntario. La RLS permite esta lectura a admin y guard. */
+export async function getVolunteerCheckIns(id: string, limit = 20): Promise<VolunteerCheckIn[]> {
+  const { data, error } = await supabase
+    .from('check_ins')
+    .select('id, checked_in_at, points_awarded, visit_number, status')
+    .eq('volunteer_id', id)
+    .order('checked_in_at', { ascending: false })
+    .limit(limit);
+
+  if (error) throw new Error(`No se pudo cargar el historial de visitas: ${error.message}`);
+
+  return (data ?? []).map((row) => ({
+    id: row.id,
+    checkedInAt: row.checked_in_at,
+    pointsAwarded: row.points_awarded,
+    visitNumber: row.visit_number,
+    status: row.status,
+  })) as VolunteerCheckIn[];
 }
 
 /**
