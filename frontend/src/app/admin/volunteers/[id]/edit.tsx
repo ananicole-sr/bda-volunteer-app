@@ -15,7 +15,7 @@ import {
   useRouter,
 } from 'expo-router';
 
-import { getVolunteerById } from '@/services/volunteers';
+import { deactivateVolunteer, getVolunteerById } from '@/services/volunteers';
 import type { Volunteer } from '@/types/volunteer';
 
 export default function EditVolunteerScreen() {
@@ -25,6 +25,38 @@ export default function EditVolunteerScreen() {
   const [volunteer, setVolunteer] = useState<Volunteer | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  // Desactivar en dos pasos: el primer toque pide confirmacion, el segundo llama a la Edge Function.
+  const [confirmingDeactivate, setConfirmingDeactivate] = useState(false);
+  const [deactivating, setDeactivating] = useState(false);
+  const [deactivateError, setDeactivateError] = useState<string | null>(null);
+
+  const handleDeactivate = async () => {
+    if (!volunteer) return;
+
+    try {
+      setDeactivating(true);
+      setDeactivateError(null);
+
+      const result = await deactivateVolunteer(volunteer.id);
+
+      if (result.code !== 'ok') {
+        setDeactivateError(result.message ?? 'El voluntario ya no existe.');
+        return;
+      }
+
+      // La lista del dashboard solo muestra activos, asi que regresamos ahi.
+      router.replace('/admin');
+    } catch (err) {
+      setDeactivateError(
+        err instanceof Error
+          ? err.message
+          : 'No se pudo desactivar al voluntario. Intenta de nuevo.'
+      );
+    } finally {
+      setDeactivating(false);
+    }
+  };
 
   const loadVolunteer = useCallback(async () => {
     if (!id) return;
@@ -213,6 +245,72 @@ export default function EditVolunteerScreen() {
           Guardar cambios
         </Text>
       </TouchableOpacity>
+
+      {/* Desactivar */}
+      <View className="mt-4 rounded-2xl border border-red-200 bg-white p-5">
+        <Text className="text-sm font-extrabold text-zinc-900">
+          Desactivar voluntario
+        </Text>
+
+        {volunteer.isActive ? (
+          <>
+            <Text className="mt-1 text-xs text-[#666665]">
+              Ya no podrá registrar visitas con su tarjeta. Su historial y sus puntos se conservan.
+            </Text>
+
+            {confirmingDeactivate ? (
+              <View className="mt-4">
+                <Text className="mb-3 text-xs font-bold text-red-600">
+                  ¿Seguro que quieres desactivar a {volunteer.name}?
+                </Text>
+
+                <View className="flex-row gap-3">
+                  <TouchableOpacity
+                    disabled={deactivating}
+                    onPress={() => setConfirmingDeactivate(false)}
+                    className="flex-1 items-center rounded-xl border border-zinc-300 py-3"
+                  >
+                    <Text className="text-sm font-bold text-zinc-700">
+                      Cancelar
+                    </Text>
+                  </TouchableOpacity>
+
+                  <TouchableOpacity
+                    disabled={deactivating}
+                    onPress={handleDeactivate}
+                    className={`flex-1 items-center rounded-xl bg-red-600 py-3 ${deactivating ? 'opacity-60' : ''}`}
+                  >
+                    <Text className="text-sm font-bold text-white">
+                      {deactivating ? 'Desactivando…' : 'Sí, desactivar'}
+                    </Text>
+                  </TouchableOpacity>
+                </View>
+              </View>
+            ) : (
+              <TouchableOpacity
+                onPress={() => setConfirmingDeactivate(true)}
+                className="mt-4 items-center rounded-xl border border-red-600 py-3"
+              >
+                <Text className="text-sm font-bold text-red-600">
+                  Desactivar voluntario
+                </Text>
+              </TouchableOpacity>
+            )}
+
+            {deactivateError ? (
+              <Text className="mt-3 text-xs font-semibold text-red-600">
+                {deactivateError}
+              </Text>
+            ) : null}
+          </>
+        ) : (
+          <View className="mt-3 self-start rounded-full bg-zinc-100 px-3 py-1.5">
+            <Text className="text-[10px] font-bold uppercase text-[#666665]">
+              Inactivo
+            </Text>
+          </View>
+        )}
+      </View>
 
     </ScrollView>
   );
