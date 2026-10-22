@@ -121,6 +121,24 @@ export async function listRedemptionRequests(
   return toPage(items, count, r);
 }
 
+/** Estado de entrega de varias solicitudes (RLS: solo admin). Ids inexistentes no aparecen. */
+export async function getRedemptionStatuses(
+  requestIds: string[]
+): Promise<Record<string, RedemptionStatus>> {
+  if (requestIds.length === 0) return {};
+
+  const { data, error } = await supabase
+    .from('redemption_requests')
+    .select('id, status')
+    .in('id', requestIds);
+
+  if (error) {
+    throw new Error(`No se pudo cargar el estado de los canjes: ${error.message}`);
+  }
+
+  return Object.fromEntries((data ?? []).map((row) => [row.id, row.status as RedemptionStatus]));
+}
+
 /** Marca la solicitud como entregada (solo admin). No cobra de nuevo; repetir es seguro. */
 export async function markRedemptionDelivered(requestId: string): Promise<MarkRedemptionDeliveredResult> {
   const res = await callEdgeFunction<
