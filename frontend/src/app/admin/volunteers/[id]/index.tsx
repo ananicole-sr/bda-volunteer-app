@@ -1,6 +1,5 @@
 import React, {
   useCallback,
-  useEffect,
   useState,
 } from 'react';
 
@@ -13,6 +12,7 @@ import {
 } from 'react-native';
 
 import {
+  useFocusEffect,
   useLocalSearchParams,
   useRouter,
 } from 'expo-router';
@@ -53,9 +53,12 @@ export default function VolunteerProfileScreen() {
     }
   }, [id]);
 
-  useEffect(() => {
-    loadVolunteer();
-  }, [loadVolunteer]);
+  // Recarga al volver de la pantalla de edicion para mostrar los datos nuevos.
+  useFocusEffect(
+    useCallback(() => {
+      loadVolunteer();
+    }, [loadVolunteer])
+  );
 
   if (loading) {
     return (
