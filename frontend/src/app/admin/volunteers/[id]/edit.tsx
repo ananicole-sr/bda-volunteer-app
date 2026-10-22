@@ -15,7 +15,7 @@ import {
   useRouter,
 } from 'expo-router';
 
-import { deactivateVolunteer, getVolunteerById } from '@/services/volunteers';
+import { deactivateVolunteer, getVolunteerById, updateVolunteer } from '@/services/volunteers';
 import type { Volunteer } from '@/types/volunteer';
 
 export default function EditVolunteerScreen() {
@@ -25,6 +25,11 @@ export default function EditVolunteerScreen() {
   const [volunteer, setVolunteer] = useState<Volunteer | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const [fullName, setFullName] = useState('');
+  const [community, setCommunity] = useState('');
+  const [saving, setSaving] = useState(false);
+  const [saveError, setSaveError] = useState<string | null>(null);
 
   // Desactivar en dos pasos: el primer toque pide confirmacion, el segundo llama a la Edge Function.
   const [confirmingDeactivate, setConfirmingDeactivate] = useState(false);
@@ -58,6 +63,53 @@ export default function EditVolunteerScreen() {
     }
   };
 
+  const trimmedName = fullName.trim();
+  const trimmedCommunity = community.trim();
+  const nameChanged = !!volunteer && trimmedName !== volunteer.name;
+  const communityChanged = !!volunteer && trimmedCommunity !== volunteer.community;
+  const canSave = (nameChanged || communityChanged) && !saving;
+
+  const handleSave = async () => {
+    if (!volunteer) return;
+
+    if (!trimmedName || !trimmedCommunity) {
+      setSaveError('Nombre y comunidad son obligatorios.');
+      return;
+    }
+
+    if (trimmedName.length > 120 || trimmedCommunity.length > 120) {
+      setSaveError('Nombre y comunidad deben tener máximo 120 caracteres.');
+      return;
+    }
+
+    try {
+      setSaving(true);
+      setSaveError(null);
+
+      // Solo mandamos los campos que cambiaron.
+      const result = await updateVolunteer(volunteer.id, {
+        ...(nameChanged && { fullName: trimmedName }),
+        ...(communityChanged && { community: trimmedCommunity }),
+      });
+
+      if (result.code !== 'ok') {
+        setSaveError(result.message ?? 'El voluntario ya no existe.');
+        return;
+      }
+
+      // El perfil recarga al recuperar el foco.
+      router.back();
+    } catch (err) {
+      setSaveError(
+        err instanceof Error
+          ? err.message
+          : 'No se pudieron guardar los cambios. Intenta de nuevo.'
+      );
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const loadVolunteer = useCallback(async () => {
     if (!id) return;
 
@@ -68,6 +120,8 @@ export default function EditVolunteerScreen() {
       const data = await getVolunteerById(id);
 
       setVolunteer(data);
+      setFullName(data?.name ?? '');
+      setCommunity(data?.community ?? '');
     } catch (err) {
       setError(
         err instanceof Error
@@ -185,9 +239,13 @@ export default function EditVolunteerScreen() {
           </Text>
 
           <TextInput
-            value={volunteer.name}
-            editable={false}
-            className="rounded-xl border border-zinc-200 bg-[#f4f4f2] px-4 py-3.5 text-sm text-zinc-900"
+            value={fullName}
+            onChangeText={setFullName}
+            editable={!saving}
+            maxLength={120}
+            placeholder="Ej. Sofía Ramírez"
+            placeholderTextColor="#a0a09e"
+            className="rounded-xl border border-zinc-200 bg-white px-4 py-3.5 text-sm text-zinc-900"
           />
         </View>
 
@@ -198,9 +256,13 @@ export default function EditVolunteerScreen() {
           </Text>
 
           <TextInput
-            value={volunteer.community}
-            editable={false}
-            className="rounded-xl border border-zinc-200 bg-[#f4f4f2] px-4 py-3.5 text-sm text-zinc-900"
+            value={community}
+            onChangeText={setCommunity}
+            editable={!saving}
+            maxLength={120}
+            placeholder="Ej. Zapopan"
+            placeholderTextColor="#a0a09e"
+            className="rounded-xl border border-zinc-200 bg-white px-4 py-3.5 text-sm text-zinc-900"
           />
         </View>
 
@@ -237,12 +299,19 @@ export default function EditVolunteerScreen() {
       </View>
 
       {/* Guardar */}
+      {saveError ? (
+        <Text className="mt-4 text-xs font-semibold text-red-600">
+          {saveError}
+        </Text>
+      ) : null}
+
       <TouchableOpacity
-        disabled
-        className="mt-5 items-center rounded-xl bg-[#e88e29] py-4 opacity-50"
+        disabled={!canSave}
+        onPress={handleSave}
+        className={`mt-5 items-center rounded-xl bg-[#e88e29] py-4 ${canSave ? '' : 'opacity-50'}`}
       >
         <Text className="text-sm font-bold text-white">
-          Guardar cambios
+          {saving ? 'Guardando…' : 'Guardar cambios'}
         </Text>
       </TouchableOpacity>
 
