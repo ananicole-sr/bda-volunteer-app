@@ -6,18 +6,26 @@ import {
   TouchableOpacity,
 } from 'react-native';
 
+import RedemptionDeliveryRow from '@/components/admin/redemptions/RedemptionDeliveryRow';
+import type { RedemptionRecord } from '@/types/redemption';
 import type { Volunteer, VolunteerCheckIn } from '@/types/volunteer';
 
 interface VolunteerProfileProps {
   volunteer: Volunteer;
   onEdit: () => void;
+  onRedeem: () => void;
   visits: VolunteerCheckIn[];
+  redemptions: RedemptionRecord[];
+  onRedemptionDelivered: (record: RedemptionRecord) => void;
 }
 
 export default function VolunteerProfile({
   volunteer,
   onEdit,
+  onRedeem,
   visits,
+  redemptions,
+  onRedemptionDelivered,
 }: VolunteerProfileProps) {
   return (
     <View>
@@ -60,6 +68,15 @@ export default function VolunteerProfile({
         >
           <Text className="text-sm font-bold text-white">
             Editar perfil
+          </Text>
+        </TouchableOpacity>
+
+        <TouchableOpacity
+          onPress={onRedeem}
+          className="mt-3 items-center rounded-xl border border-[#e88e29] py-3"
+        >
+          <Text className="text-sm font-bold text-[#e88e29]">
+            Canjear recompensa
           </Text>
         </TouchableOpacity>
       </View>
@@ -116,6 +133,21 @@ export default function VolunteerProfile({
             {volunteer.community}
           </Text>
         </View>
+      </View>
+
+      <View className="mt-4 rounded-2xl border border-zinc-200 bg-white p-4">
+        <Text className="mb-3 text-sm font-extrabold text-zinc-900">Historial de canjes</Text>
+        {redemptions.length === 0 ? (
+          <Text className="text-sm text-[#666665]">Aún no hay canjes registrados.</Text>
+        ) : redemptions.map((record) => (
+          <RedemptionDeliveryRow
+            key={record.id}
+            record={record}
+            volunteerName={volunteer.name}
+            showDate
+            onDelivered={onRedemptionDelivered}
+          />
+        ))}
       </View>
 
       <View className="mt-4 rounded-2xl border border-zinc-200 bg-white p-4">

@@ -59,13 +59,23 @@ export default function AdminRewardsScreen() {
           Gestión de catálogo
         </Text>
 
-        <TouchableOpacity
-          onPress={() => router.push('/admin/rewards/add')}
-          className="rounded-xl bg-[#e88e29] px-4 py-2.5">
-          <Text className="text-sm font-bold text-white">
-            + Añadir
-          </Text>
-        </TouchableOpacity>
+        <View className="flex-row gap-2">
+          <TouchableOpacity
+            onPress={() => router.push('/admin/rewards/redeem-card' as never)}
+            className="rounded-xl border border-[#218750] bg-white px-3 py-2.5">
+            <Text className="text-sm font-bold text-[#218750]">
+              Canjear con tarjeta
+            </Text>
+          </TouchableOpacity>
+
+          <TouchableOpacity
+            onPress={() => router.push('/admin/rewards/add')}
+            className="rounded-xl bg-[#e88e29] px-4 py-2.5">
+            <Text className="text-sm font-bold text-white">
+              + Añadir
+            </Text>
+          </TouchableOpacity>
+        </View>
 
         </View>
 

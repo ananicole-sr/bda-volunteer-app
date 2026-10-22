@@ -18,7 +18,9 @@ import {
 } from 'expo-router';
 
 import VolunteerProfile from '@/components/admin/dashboard/VolunteerProfile';
+import { getVolunteerRedemptions } from '@/services/redemptions';
 import { getVolunteerById, getVolunteerCheckIns } from '@/services/volunteers';
+import type { RedemptionRecord } from '@/types/redemption';
 import type { Volunteer, VolunteerCheckIn } from '@/types/volunteer';
 
 export default function VolunteerProfileScreen() {
@@ -28,6 +30,7 @@ export default function VolunteerProfileScreen() {
   const [volunteer, setVolunteer] =
     useState<Volunteer | null>(null);
   const [visits, setVisits] = useState<VolunteerCheckIn[]>([]);
+  const [redemptions, setRedemptions] = useState<RedemptionRecord[]>([]);
 
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -39,9 +42,14 @@ export default function VolunteerProfileScreen() {
       setLoading(true);
       setError(null);
 
-      const [data, visitData] = await Promise.all([getVolunteerById(id), getVolunteerCheckIns(id)]);
+      const [data, visitData, redemptionData] = await Promise.all([
+        getVolunteerById(id),
+        getVolunteerCheckIns(id),
+        getVolunteerRedemptions(id),
+      ]);
       setVolunteer(data);
       setVisits(visitData);
+      setRedemptions(redemptionData);
     } catch (err) {
       setError(
         err instanceof Error
@@ -115,9 +123,18 @@ export default function VolunteerProfileScreen() {
       <VolunteerProfile
         volunteer={volunteer}
         visits={visits}
+        redemptions={redemptions}
+        onRedemptionDelivered={(record) =>
+          setRedemptions((current) => current.map((r) => (r.id === record.id ? record : r)))
+        }
         onEdit={() =>
           router.push(
             `/admin/volunteers/${volunteer.id}/edit` as any
+          )
+        }
+        onRedeem={() =>
+          router.push(
+            `/admin/volunteers/${volunteer.id}/redeem` as any
           )
         }
       />

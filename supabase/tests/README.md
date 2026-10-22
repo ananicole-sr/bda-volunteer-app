@@ -1,10 +1,13 @@
-# Pruebas de las migraciones 002 a 008
+# Pruebas de las migraciones 002 a 010
 
-`run_tests.sh` aplica 002 a 008 y corre `10_test_cases.sql` (002),
+`run_tests.sh` aplica 002 a 008 y 010 (009 usa el schema `storage` de
+Supabase y no se aplica aqui) y corre `10_test_cases.sql` (002),
 `20_volunteer_management_cases.sql` (003), `30_rewards_management_cases.sql`
 (004), `40_volunteer_accounts_cases.sql` (005), `50_redemptions_cases.sql`
-(006), `60_volunteer_registration_cases.sql` (007) y `70_issue_card_cases.sql`
-(008); cada archivo imprime su
+(006), `60_volunteer_registration_cases.sql` (007), `70_issue_card_cases.sql`
+(008) y `80_admin_redemptions_cases.sql` (010). Como 010 redefine
+`redeem_rewards`, las pruebas de 006 corren contra esa version (regresion).
+Cada archivo imprime su
 propia tabla y resumen. Secciones extra: [1c] misma cuenta vinculada en
 paralelo; [1d] canjes en paralelo (saldo, ultima unidad de stock, mismo
 request_id); [1e] dos altas con la misma tarjeta en paralelo; [2c] aplicar

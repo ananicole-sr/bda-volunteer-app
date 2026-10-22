@@ -129,6 +129,33 @@ Foto de perfil (supabase/009_volunteer_avatars.sql).
    volunteers.avatar_url guarda la ruta, no la URL; el cliente arma la URL pública. Valores que empiezan con
    http(s) (datos viejos o seed) se usan tal cual.
 
+Canje por el admin y entrega por canje (supabase/010_admin_redemptions.sql).
+Cada renglón de reward_redemptions es un canje con su propio estado (status: pending_delivery | delivered;
+null = histórico previo a 006). Entregar un canje no toca los demás; la solicitud (redemption_requests.status)
+pasa a delivered cuando ya no le queda ninguno pendiente. Canjear la misma recompensa dos veces = dos canjes.
+redemption_requests.channel: volunteer_app | admin | admin_card. Los items de "request" (funciones 10, 11,
+15 y 16) traen además id, status y delivered_at.
+15) admin-redeem-rewards (rol: admin)
+   Request:  { volunteer_id: uuid, client_request_id: uuid v4, reward_ids: uuid[] }   mismas reglas que la función 10.
+   Response: igual que la función 10. Códigos: ok | volunteer_not_found | volunteer_inactive | idempotency_conflict
+             | reward_unavailable | insufficient_points
+16) redeem-rewards-card (rol: admin)
+   Request:  { uid: string, client_request_id: uuid v4, reward_ids: uuid[] }   el voluntario sale de la tarjeta;
+             un volunteer_id en el cuerpo se ignora.
+   Response: igual que la función 10. Códigos: los de la 15 (salvo volunteer_not_found) | card_unknown | card_inactive
+17) lookup-card (rol: admin; solo lectura)
+   Request:  { uid: string }
+   Response: { code, message?, volunteer?: { id, full_name, community, points, avatar_url } }
+   Códigos: ok | card_unknown | card_inactive | volunteer_inactive (trae volunteer: { id, full_name })
+   Flujo de canje con tarjeta: lookup-card para mostrar dueño y saldo -> el admin confirma ->
+   redeem-rewards-card con el MISMO uid (el servidor vuelve a resolver al voluntario).
+18) mark-redemption-item-delivered (rol: admin)
+   Request:  { redemption_id: uuid }   (reward_redemptions.id)
+   Response: { code, message?, already_delivered?: boolean, request_status?: "pending_delivery"|"delivered"|null,
+               redemption?: { id, request_id, volunteer_id, reward_id, name, points_spent, redeemed_at, status, delivered_at } }
+   Códigos: ok | redemption_not_found. Idempotente. No toca puntos ni stock.
+mark-redemption-delivered (función 11) ahora también entrega todos los canjes pendientes de la solicitud.
+
 Cambio de contraseña (opcional, sin Edge Function): el usuario con sesión usa supabase.auth.updateUser({ password })
 tras verificar su contraseña actual. Nunca recibe un id de usuario.
 

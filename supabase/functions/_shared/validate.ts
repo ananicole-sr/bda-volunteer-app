@@ -328,6 +328,58 @@ export function parseRedeemRewards(body: unknown): Parsed<RedeemRewardsBody> {
   return { ok: true, value: { client_request_id: b.client_request_id.toLowerCase(), reward_ids: ids.value } };
 }
 
+export interface AdminRedeemRewardsBody extends RedeemRewardsBody {
+  volunteer_id: string;
+}
+
+export function parseAdminRedeemRewards(body: unknown): Parsed<AdminRedeemRewardsBody> {
+  const b = asRecord(body);
+  if (!b) return fail("el cuerpo debe ser un objeto JSON");
+  const id = volunteerId(b.volunteer_id);
+  if ("ok" in id) return id;
+  const rest = parseRedeemRewards(b);
+  if (!rest.ok) return rest;
+  return { ok: true, value: { volunteer_id: id.value, ...rest.value } };
+}
+
+export interface RedeemRewardsCardBody extends RedeemRewardsBody {
+  uid: string; // ya normalizado; el voluntario sale de la tarjeta
+}
+
+export function parseRedeemRewardsCard(body: unknown): Parsed<RedeemRewardsCardBody> {
+  const b = asRecord(body);
+  if (!b) return fail("el cuerpo debe ser un objeto JSON");
+  const uid = normalizeUid(b.uid);
+  if (uid === null) return fail("uid invalido: hex de 8, 14 o 20 caracteres");
+  const rest = parseRedeemRewards(b);
+  if (!rest.ok) return rest;
+  return { ok: true, value: { uid, ...rest.value } };
+}
+
+export interface LookupCardBody {
+  uid: string; // ya normalizado
+}
+
+export function parseLookupCard(body: unknown): Parsed<LookupCardBody> {
+  const b = asRecord(body);
+  if (!b) return fail("el cuerpo debe ser un objeto JSON");
+  const uid = normalizeUid(b.uid);
+  if (uid === null) return fail("uid invalido: hex de 8, 14 o 20 caracteres");
+  return { ok: true, value: { uid } };
+}
+
+export interface MarkRedemptionItemDeliveredBody {
+  redemption_id: string; // reward_redemptions.id
+}
+
+export function parseMarkRedemptionItemDelivered(body: unknown): Parsed<MarkRedemptionItemDeliveredBody> {
+  const b = asRecord(body);
+  if (!b) return fail("el cuerpo debe ser un objeto JSON");
+  const id = uuidField(b.redemption_id, "redemption_id");
+  if ("ok" in id) return id;
+  return { ok: true, value: { redemption_id: id.value } };
+}
+
 export interface MarkRedemptionDeliveredBody {
   request_id: string; // redemption_requests.id
 }

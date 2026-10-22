@@ -20,6 +20,10 @@ que reciben `uid`) y llama a la funcion SQL con `service_role`.
 | `mark-notifications-read` | admin      | `mark_admin_notifications_read` | 006 |
 | `register-volunteer-account` | admin   | `begin_` / `complete_` / `fail_volunteer_registration` + `auth.admin.createUser` | 007 |
 | `set-volunteer-avatar` | admin         | `set_volunteer_avatar` | 009       |
+| `admin-redeem-rewards` | admin         | `admin_redeem_rewards` | 010       |
+| `redeem-rewards-card`  | admin         | `admin_redeem_rewards_by_card` | 010 |
+| `lookup-card`          | admin         | `lookup_card_volunteer` | 010      |
+| `mark-redemption-item-delivered` | admin | `mark_redemption_item_delivered` | 010 |
 
 `register-volunteer-account` no usa `createHandler`: orquesta SQL + Supabase
 Auth en `_shared/registration.ts` (reusa `authorize()` para JWT y rol).
@@ -92,7 +96,8 @@ notificaciones (migracion 006), `docs/deploy-006-redemptions.md`. Para el
 alta con cuenta (migracion 007), `docs/deploy-007-volunteer-registration.md`.
 Para CORS y la correccion de `issue_card` (migracion 008),
 `docs/deploy-008-cors-issue-card.md`. Para la foto de perfil (migracion 009),
-`docs/deploy-009-volunteer-avatars.md`.
+`docs/deploy-009-volunteer-avatars.md`. Para el canje por el admin y la
+entrega por canje (migracion 010), `docs/deploy-010-admin-redemptions.md`.
 
 Por defecto Supabase exige un JWT valido en el gateway (`verify_jwt`); ademas
 cada funcion lo revalida con `auth.getUser` y comprueba el rol. Antes de

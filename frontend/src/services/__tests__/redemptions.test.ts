@@ -3,10 +3,16 @@ import { FunctionsHttpError } from '@supabase/supabase-js';
 
 import { EdgeFunctionError } from '@/lib/edgeFunctions';
 import {
+  adminRedeemRewards,
   createRedemptionRequestId,
+  getRedemptionsByRequest,
+  getVolunteerRedemptions,
   listRedemptionRequests,
+  lookupCard,
   markRedemptionDelivered,
+  markRedemptionItemDelivered,
   redeemRewards,
+  redeemRewardsWithCard,
 } from '../redemptions';
 
 const mockInvoke = jest.fn();
@@ -18,7 +24,7 @@ function mockBuilder(table: string) {
   const q = { table, calls: [] as Call[] };
   mockQueries.push(q);
   const b: Record<string, unknown> = {};
-  for (const m of ['select', 'eq', 'is', 'order', 'range']) {
+  for (const m of ['select', 'eq', 'in', 'is', 'order', 'range', 'limit']) {
     b[m] = (...args: unknown[]) => {
       q.calls.push([m, ...args]);
       return b;
@@ -171,5 +177,94 @@ describe('admin: solicitudes y entrega', () => {
 
     mockInvoke.mockResolvedValueOnce({ data: { code: 'request_not_found', message: 'no' }, error: null });
     expect(await markRedemptionDelivered('q2')).toEqual({ code: 'request_not_found', message: 'no' });
+  });
+});
+
+const itemRow = {
+  id: 'rr1', request_id: 'q1', reward_id: R1, points_spent: 100, redeemed_at: '2026-10-18T20:00:00Z',
+  status: 'pending_delivery', delivered_at: null, reward: { name: 'Cien' },
+};
+const mappedItem = {
+  id: 'rr1', requestId: 'q1', rewardId: R1, name: 'Cien', pointsSpent: 100, redeemedAt: '2026-10-18T20:00:00Z',
+  status: 'pending_delivery', deliveredAt: null,
+};
+
+describe('admin: canje para un voluntario y con tarjeta (010)', () => {
+  it('adminRedeemRewards manda volunteer_id, client_request_id y reward_ids; mapea igual que redeemRewards', async () => {
+    mockInvoke.mockResolvedValueOnce({ data: { code: 'ok', replayed: false, balance: 200, request: requestJson }, error: null });
+    expect(await adminRedeemRewards('v1', [R1, R2], CRID)).toEqual({
+      code: 'ok', replayed: false, balance: 200, request: mappedRequest,
+    });
+    expect(mockInvoke.mock.calls).toEqual([
+      ['admin-redeem-rewards', { body: { volunteer_id: 'v1', client_request_id: CRID, reward_ids: [R1, R2] } }],
+    ]);
+
+    mockInvoke.mockResolvedValueOnce({ data: { code: 'volunteer_not_found', message: 'x' }, error: null });
+    expect(await adminRedeemRewards('v2', [R1], CRID)).toEqual({ code: 'volunteer_not_found', message: 'x' });
+  });
+
+  it('redeemRewardsWithCard manda el uid y nunca un volunteer_id', async () => {
+    mockInvoke.mockResolvedValueOnce({ data: { code: 'card_inactive', message: 'Tarjeta revoked' }, error: null });
+    expect(await redeemRewardsWithCard('04A1B2C3', [R1], CRID)).toEqual({ code: 'card_inactive', message: 'Tarjeta revoked' });
+    expect(mockInvoke.mock.calls).toEqual([
+      ['redeem-rewards-card', { body: { uid: '04A1B2C3', client_request_id: CRID, reward_ids: [R1] } }],
+    ]);
+  });
+
+  it('lookupCard mapea el dueno de la tarjeta y los rechazos', async () => {
+    mockInvoke.mockResolvedValueOnce({
+      data: { code: 'ok', volunteer: { id: 'v1', full_name: 'Ana', community: 'Centro', points: 120, avatar_url: null } },
+      error: null,
+    });
+    expect(await lookupCard('04A1B2C3')).toEqual({
+      code: 'ok', volunteer: { id: 'v1', name: 'Ana', community: 'Centro', points: 120, avatar: undefined },
+    });
+    expect(mockInvoke.mock.calls[0]).toEqual(['lookup-card', { body: { uid: '04A1B2C3' } }]);
+
+    mockInvoke.mockResolvedValueOnce({
+      data: { code: 'volunteer_inactive', message: 'm', volunteer: { id: 'v2', full_name: 'Beto' } }, error: null,
+    });
+    expect(await lookupCard('04A1B2C3')).toEqual({ code: 'volunteer_inactive', message: 'm', volunteer: { id: 'v2', name: 'Beto' } });
+
+    mockInvoke.mockResolvedValueOnce({ data: { code: 'card_unknown', message: 'n' }, error: null });
+    expect(await lookupCard('04A1B2C3')).toEqual({ code: 'card_unknown', message: 'n' });
+  });
+});
+
+describe('admin: canjes por renglon (010)', () => {
+  it('getVolunteerRedemptions filtra por voluntario y mapea cada canje con su estado', async () => {
+    mockResults.push({ data: [itemRow], error: null });
+    expect(await getVolunteerRedemptions('v1')).toEqual([mappedItem]);
+    expect(mockQueries[0].table).toBe('reward_redemptions');
+    expect(mockQueries[0].calls).toContainEqual(['eq', 'volunteer_id', 'v1']);
+  });
+
+  it('getRedemptionsByRequest agrupa por request_id y no consulta con lista vacia', async () => {
+    expect(await getRedemptionsByRequest([])).toEqual({});
+    expect(mockQueries).toHaveLength(0);
+
+    mockResults.push({ data: [itemRow, { ...itemRow, id: 'rr2', reward_id: R2 }], error: null });
+    const grouped = await getRedemptionsByRequest(['q1']);
+    expect(Object.keys(grouped)).toEqual(['q1']);
+    expect(grouped.q1.map((r) => r.id)).toEqual(['rr1', 'rr2']);
+    expect(mockQueries[0].calls).toContainEqual(['in', 'request_id', ['q1']]);
+  });
+
+  it('markRedemptionItemDelivered manda solo redemption_id y mapea el canje y el estado de la solicitud', async () => {
+    mockInvoke.mockResolvedValueOnce({
+      data: {
+        code: 'ok', already_delivered: false, request_status: 'pending_delivery',
+        redemption: { ...itemRow, reward: undefined, name: 'Cien', status: 'delivered', delivered_at: 'x' },
+      },
+      error: null,
+    });
+    expect(await markRedemptionItemDelivered('rr1')).toEqual({
+      code: 'ok', alreadyDelivered: false, requestStatus: 'pending_delivery',
+      redemption: { ...mappedItem, status: 'delivered', deliveredAt: 'x' },
+    });
+    expect(mockInvoke.mock.calls).toEqual([['mark-redemption-item-delivered', { body: { redemption_id: 'rr1' } }]]);
+
+    mockInvoke.mockResolvedValueOnce({ data: { code: 'redemption_not_found', message: 'no' }, error: null });
+    expect(await markRedemptionItemDelivered('rr9')).toEqual({ code: 'redemption_not_found', message: 'no' });
   });
 });

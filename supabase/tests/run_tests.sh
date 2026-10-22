@@ -61,13 +61,15 @@ prepare_db "$TESTDB"
   -f "$SUPABASE_DIR/006_redemptions.sql" \
   -f "$SUPABASE_DIR/007_volunteer_registration.sql" \
   -f "$SUPABASE_DIR/008_fix_issue_card.sql" \
+  -f "$SUPABASE_DIR/010_admin_redemptions.sql" \
   -f "$SCRIPT_DIR/10_test_cases.sql" \
   -f "$SCRIPT_DIR/20_volunteer_management_cases.sql" \
   -f "$SCRIPT_DIR/30_rewards_management_cases.sql" \
   -f "$SCRIPT_DIR/40_volunteer_accounts_cases.sql" \
   -f "$SCRIPT_DIR/50_redemptions_cases.sql" \
   -f "$SCRIPT_DIR/60_volunteer_registration_cases.sql" \
-  -f "$SCRIPT_DIR/70_issue_card_cases.sql"
+  -f "$SCRIPT_DIR/70_issue_card_cases.sql" \
+  -f "$SCRIPT_DIR/80_admin_redemptions_cases.sql"
 MAIN_STATUS=$?
 
 echo

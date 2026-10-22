@@ -13,6 +13,10 @@ import {
   markNotificationsReadSpec,
   markRedemptionDeliveredSpec,
   redeemRewardsSpec,
+  adminRedeemRewardsSpec,
+  lookupCardSpec,
+  markRedemptionItemDeliveredSpec,
+  redeemRewardsCardSpec,
   setVolunteerAvatarSpec,
   updateRewardSpec,
   updateVolunteerSpec,
@@ -29,6 +33,10 @@ import {
   parseMarkNotificationsRead,
   parseMarkRedemptionDelivered,
   parseRedeemRewards,
+  parseAdminRedeemRewards,
+  parseLookupCard,
+  parseMarkRedemptionItemDelivered,
+  parseRedeemRewardsCard,
   parseSetVolunteerAvatar,
   parseUpdateReward,
   parseUpdateVolunteer,
@@ -847,4 +855,105 @@ Deno.test("mark-redemption-delivered y mark-notifications-read: solo admin; ids 
 
   const bad = await createHandler(markNotificationsReadSpec, fake().deps)(req({ notification_ids: [R1], all: true }));
   assertEquals([bad.status, (await bad.json()).code], [400, "invalid_request"]);
+});
+
+// ---------------------------------------------------------------- canje por el admin (010)
+const HMAC_04A1B2C3 = "f16abcbfdaec29b865bb65db3e1ada740e772a94e835f378dfb1766584cf90d0";
+
+Deno.test("parseAdminRedeemRewards / parseRedeemRewardsCard / parseLookupCard / parseMarkRedemptionItemDelivered", () => {
+  const a = parseAdminRedeemRewards({ volunteer_id: VID, client_request_id: CRID, reward_ids: [R1, R2], points: 1 });
+  assert(a.ok);
+  assertEquals(a.value, {
+    volunteer_id: vid, client_request_id: CRID.toLowerCase(), reward_ids: [R1.toLowerCase(), R2.toLowerCase()],
+  });
+  assertEquals(parseAdminRedeemRewards({ client_request_id: CRID, reward_ids: [R1] }).ok, false);
+  assertEquals(parseAdminRedeemRewards({ volunteer_id: VID, client_request_id: CRID, reward_ids: [] }).ok, false);
+
+  const c = parseRedeemRewardsCard({ uid: "04:a1:b2:c3", client_request_id: CRID, reward_ids: [R1], volunteer_id: VID });
+  assert(c.ok);
+  assertEquals(c.value, { uid: "04A1B2C3", client_request_id: CRID.toLowerCase(), reward_ids: [R1.toLowerCase()] });
+  assertEquals(parseRedeemRewardsCard({ client_request_id: CRID, reward_ids: [R1] }).ok, false);
+  assertEquals(parseRedeemRewardsCard({ uid: "XYZ", client_request_id: CRID, reward_ids: [R1] }).ok, false);
+
+  const l = parseLookupCard({ uid: "04a1b2c3" });
+  assert(l.ok);
+  assertEquals(l.value, { uid: "04A1B2C3" });
+  assertEquals(parseLookupCard({}).ok, false);
+
+  const m = parseMarkRedemptionItemDelivered({ redemption_id: R1, request_id: CRID });
+  assert(m.ok);
+  assertEquals(m.value, { redemption_id: R1.toLowerCase() });
+  assertEquals(parseMarkRedemptionItemDelivered({ redemption_id: "x" }).ok, false);
+});
+
+Deno.test("canje por admin, con tarjeta, consulta de tarjeta y entrega por renglon: solo admin", async () => {
+  const cases = [
+    { spec: adminRedeemRewardsSpec, body: { volunteer_id: VID, client_request_id: CRID, reward_ids: [R1] } },
+    { spec: redeemRewardsCardSpec, body: { uid: "04A1B2C3", client_request_id: CRID, reward_ids: [R1] } },
+    { spec: lookupCardSpec, body: { uid: "04A1B2C3" } },
+    { spec: markRedemptionItemDeliveredSpec, body: { redemption_id: R1 } },
+  ] as const;
+  for (const { spec, body } of cases) {
+    for (const role of ["volunteer", "guard", null]) {
+      const f = fake({ role });
+      const res = await createHandler(spec as unknown as typeof lookupCardSpec, f.deps)(req(body));
+      assertEquals(res.status, 403, `${spec.name} role=${role}`);
+      assertEquals(f.calls.length, 0);
+    }
+    assertEquals((await createHandler(spec as unknown as typeof lookupCardSpec, fake().deps)(req(body, null))).status, 401);
+  }
+});
+
+Deno.test("canje por admin y entrega por renglon: RPC con operator_id del JWT", async () => {
+  const f = fake({ user: "admin-1" });
+  await createHandler(adminRedeemRewardsSpec, f.deps)(
+    req({ volunteer_id: VID, client_request_id: CRID, reward_ids: [R1], operator_id: "x" }),
+  );
+  await createHandler(markRedemptionItemDeliveredSpec, f.deps)(req({ redemption_id: R2, operator_id: "x" }));
+  assertEquals(f.calls, [
+    {
+      fn: "admin_redeem_rewards",
+      args: {
+        p_volunteer_id: vid, p_client_request_id: CRID.toLowerCase(), p_reward_ids: [R1.toLowerCase()],
+        p_operator_id: "admin-1",
+      },
+    },
+    { fn: "mark_redemption_item_delivered", args: { p_redemption_id: R2.toLowerCase(), p_operator_id: "admin-1" } },
+  ]);
+});
+
+Deno.test("canje con tarjeta y consulta: mandan el HMAC del UID, nunca el UID ni un volunteer_id", async () => {
+  const f = fake({ user: "admin-1" });
+  await createHandler(redeemRewardsCardSpec, f.deps)(
+    req({ uid: "04a1b2c3", client_request_id: CRID, reward_ids: [R1], volunteer_id: VID }),
+  );
+  await createHandler(lookupCardSpec, f.deps)(req({ uid: "04:A1:B2:C3" }));
+  assertEquals(f.calls, [
+    {
+      fn: "admin_redeem_rewards_by_card",
+      args: {
+        p_uid_hmac: HMAC_04A1B2C3, p_client_request_id: CRID.toLowerCase(), p_reward_ids: [R1.toLowerCase()],
+        p_operator_id: "admin-1",
+      },
+    },
+    { fn: "lookup_card_volunteer", args: { p_uid_hmac: HMAC_04A1B2C3, p_operator_id: "admin-1" } },
+  ]);
+});
+
+Deno.test("canje con tarjeta y consulta: 500 sin CARD_UID_HMAC_SECRET, sin llamar RPC", async () => {
+  const origError = console.error;
+  console.error = () => {};
+  try {
+    for (const [spec, body] of [
+      [redeemRewardsCardSpec, { uid: "04A1B2C3", client_request_id: CRID, reward_ids: [R1] }],
+      [lookupCardSpec, { uid: "04A1B2C3" }],
+    ] as const) {
+      const f = fake({ secret: undefined });
+      const res = await createHandler(spec as unknown as typeof lookupCardSpec, f.deps)(req(body));
+      assertEquals(res.status, 500);
+      assertEquals(f.calls.length, 0);
+    }
+  } finally {
+    console.error = origError;
+  }
 });

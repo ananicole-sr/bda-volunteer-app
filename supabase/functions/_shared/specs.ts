@@ -1,5 +1,6 @@
 import type { FunctionSpec } from "./handler.ts";
 import {
+  type AdminRedeemRewardsBody,
   type CheckInBody,
   type CreateRewardBody,
   type DeactivateRewardBody,
@@ -7,8 +8,11 @@ import {
   type EnrollBody,
   type IssueCardBody,
   type LinkVolunteerAccountBody,
+  type LookupCardBody,
   type MarkNotificationsReadBody,
   type MarkRedemptionDeliveredBody,
+  type MarkRedemptionItemDeliveredBody,
+  parseAdminRedeemRewards,
   parseCheckIn,
   parseCreateReward,
   parseDeactivateReward,
@@ -16,13 +20,17 @@ import {
   parseEnroll,
   parseIssueCard,
   parseLinkVolunteerAccount,
+  parseLookupCard,
   parseMarkNotificationsRead,
   parseMarkRedemptionDelivered,
+  parseMarkRedemptionItemDelivered,
   parseRedeemRewards,
+  parseRedeemRewardsCard,
   parseSetVolunteerAvatar,
   parseUpdateReward,
   parseUpdateVolunteer,
   type RedeemRewardsBody,
+  type RedeemRewardsCardBody,
   type SetVolunteerAvatarBody,
   type UpdateRewardBody,
   type UpdateVolunteerBody,
@@ -178,6 +186,58 @@ export const markRedemptionDeliveredSpec: FunctionSpec<MarkRedemptionDeliveredBo
   toRpc: (b, _hmac, operatorId) => ({
     fn: "mark_redemption_delivered",
     args: { p_request_id: b.request_id, p_operator_id: operatorId },
+  }),
+};
+
+// El admin canjea para un voluntario elegido (perfil). requested_by = admin del JWT.
+export const adminRedeemRewardsSpec: FunctionSpec<AdminRedeemRewardsBody> = {
+  name: "admin-redeem-rewards",
+  roles: ["admin"],
+  parse: parseAdminRedeemRewards,
+  toRpc: (b, _hmac, operatorId) => ({
+    fn: "admin_redeem_rewards",
+    args: {
+      p_volunteer_id: b.volunteer_id,
+      p_client_request_id: b.client_request_id,
+      p_reward_ids: b.reward_ids,
+      p_operator_id: operatorId,
+    },
+  }),
+};
+
+// Canje con tarjeta: el voluntario lo resuelve la base a partir del HMAC del UID.
+export const redeemRewardsCardSpec: FunctionSpec<RedeemRewardsCardBody> = {
+  name: "redeem-rewards-card",
+  roles: ["admin"],
+  parse: parseRedeemRewardsCard,
+  toRpc: (b, hmac, operatorId) => ({
+    fn: "admin_redeem_rewards_by_card",
+    args: {
+      p_uid_hmac: hmac,
+      p_client_request_id: b.client_request_id,
+      p_reward_ids: b.reward_ids,
+      p_operator_id: operatorId,
+    },
+  }),
+};
+
+export const lookupCardSpec: FunctionSpec<LookupCardBody> = {
+  name: "lookup-card",
+  roles: ["admin"],
+  parse: parseLookupCard,
+  toRpc: (_b, hmac, operatorId) => ({
+    fn: "lookup_card_volunteer",
+    args: { p_uid_hmac: hmac, p_operator_id: operatorId },
+  }),
+};
+
+export const markRedemptionItemDeliveredSpec: FunctionSpec<MarkRedemptionItemDeliveredBody> = {
+  name: "mark-redemption-item-delivered",
+  roles: ["admin"],
+  parse: parseMarkRedemptionItemDelivered,
+  toRpc: (b, _hmac, operatorId) => ({
+    fn: "mark_redemption_item_delivered",
+    args: { p_redemption_id: b.redemption_id, p_operator_id: operatorId },
   }),
 };
 
