@@ -6,6 +6,8 @@ import type {
   LinkVolunteerAccountResult,
   RegisterVolunteerAccountInput,
   RegisterVolunteerAccountResult,
+  AvatarFile,
+  SetVolunteerAvatarResult,
   UpdateVolunteerInput,
   UpdateVolunteerResult,
   Volunteer,
@@ -24,6 +26,18 @@ export function formatLastVisit(timestamp: string | null): string {
   });
 }
 
+export const AVATAR_BUCKET = 'volunteer-avatars';
+
+/**
+ * avatar_url guarda la ruta dentro del bucket (migracion 009); las URLs
+ * completas (seed o datos viejos) se usan tal cual.
+ */
+export function avatarUrl(value: string | null): string | undefined {
+  if (!value) return undefined;
+  if (/^https?:\/\//i.test(value)) return value;
+  return supabase.storage.from(AVATAR_BUCKET).getPublicUrl(value).data.publicUrl;
+}
+
 function mapRowToVolunteer(row: VolunteerRow): Volunteer {
   return {
     id: row.id,
@@ -31,7 +45,7 @@ function mapRowToVolunteer(row: VolunteerRow): Volunteer {
     community: row.community,
     points: row.points,
     lastVisit: formatLastVisit(row.last_check_in_at),
-    avatar: row.avatar_url ?? undefined,
+    avatar: avatarUrl(row.avatar_url),
     isActive: row.is_active,
   };
 }
@@ -126,6 +140,40 @@ export async function linkVolunteerAccount(
   return callEdgeFunction<LinkVolunteerAccountResult>('link-volunteer-account', {
     volunteer_id: volunteerId,
     user_id: userId,
+  });
+}
+
+const AVATAR_EXTENSIONS: Record<string, string> = {
+  'image/jpeg': 'jpg',
+  'image/png': 'png',
+  'image/webp': 'webp',
+};
+
+/**
+ * Sube la foto al bucket con la sesion del admin y la asigna al voluntario
+ * (Edge Function set-volunteer-avatar, solo admin). Lanza Error si la subida
+ * falla y EdgeFunctionError en 400/401/403/500.
+ */
+export async function setVolunteerAvatar(
+  volunteerId: string,
+  file: AvatarFile
+): Promise<SetVolunteerAvatarResult> {
+  const contentType = file.mimeType ?? 'image/jpeg';
+  const extension = AVATAR_EXTENSIONS[contentType];
+  if (!extension) throw new Error('La foto debe ser JPG, PNG o WEBP.');
+
+  const path = `${volunteerId}/${createRequestId()}.${extension}`;
+  const body = await (await fetch(file.uri)).arrayBuffer();
+
+  const { error } = await supabase.storage
+    .from(AVATAR_BUCKET)
+    .upload(path, body, { contentType, upsert: false });
+
+  if (error) throw new Error(`No se pudo subir la foto: ${error.message}`);
+
+  return callEdgeFunction<SetVolunteerAvatarResult>('set-volunteer-avatar', {
+    volunteer_id: volunteerId,
+    path,
   });
 }
 

@@ -130,6 +130,27 @@ export function parseDeactivateVolunteer(body: unknown): Parsed<DeactivateVolunt
   return { ok: true, value: { volunteer_id: id.value } };
 }
 
+export interface SetVolunteerAvatarBody {
+  volunteer_id: string;
+  /** Ruta dentro del bucket volunteer-avatars: "<volunteer_id>/<nombre>.<ext>". */
+  path: string;
+}
+
+const AVATAR_FILE = /^[A-Za-z0-9_-]{1,64}\.(jpg|jpeg|png|webp)$/;
+
+export function parseSetVolunteerAvatar(body: unknown): Parsed<SetVolunteerAvatarBody> {
+  const b = asRecord(body);
+  if (!b) return fail("el cuerpo debe ser un objeto JSON");
+  const id = volunteerId(b.volunteer_id);
+  if ("ok" in id) return id;
+  if (typeof b.path !== "string") return fail("path debe ser texto");
+  const [folder, file, ...rest] = b.path.split("/");
+  if (folder !== id.value || rest.length > 0 || !file || !AVATAR_FILE.test(file)) {
+    return fail("path debe ser <volunteer_id>/<nombre>.(jpg|jpeg|png|webp)");
+  }
+  return { ok: true, value: { volunteer_id: id.value, path: b.path } };
+}
+
 export interface IssueCardBody {
   volunteer_id: string;
   uid: string;

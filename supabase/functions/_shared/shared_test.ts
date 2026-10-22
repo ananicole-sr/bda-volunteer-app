@@ -13,6 +13,7 @@ import {
   markNotificationsReadSpec,
   markRedemptionDeliveredSpec,
   redeemRewardsSpec,
+  setVolunteerAvatarSpec,
   updateRewardSpec,
   updateVolunteerSpec,
 } from "./specs.ts";
@@ -28,6 +29,7 @@ import {
   parseMarkNotificationsRead,
   parseMarkRedemptionDelivered,
   parseRedeemRewards,
+  parseSetVolunteerAvatar,
   parseUpdateReward,
   parseUpdateVolunteer,
   PG_INT_MAX,
@@ -315,6 +317,32 @@ Deno.test("parseDeactivateVolunteer: solo volunteer_id UUID", () => {
   for (const bad of [null, {}, { volunteer_id: "no-uuid" }, { volunteer_id: 1 }]) {
     assertEquals(parseDeactivateVolunteer(bad).ok, false, JSON.stringify(bad));
   }
+});
+
+Deno.test("parseSetVolunteerAvatar: path dentro de la carpeta del voluntario", () => {
+  const r = parseSetVolunteerAvatar({ volunteer_id: VID, path: `${vid}/foto_1-a.jpg`, avatar_url: "x" });
+  assert(r.ok);
+  assertEquals(r.value, { volunteer_id: vid, path: `${vid}/foto_1-a.jpg` });
+  for (const path of [
+    undefined, 1, "", "foto.jpg", `${vid}/`, `${vid}/foto.gif`, `${vid}/../x/foto.jpg`,
+    `${vid}/a/foto.jpg`, "00000000-0000-4000-8000-000000000000/foto.jpg", `https://x/${vid}/foto.jpg`,
+  ]) {
+    assertEquals(parseSetVolunteerAvatar({ volunteer_id: VID, path }).ok, false, JSON.stringify(path));
+  }
+});
+
+Deno.test("set-volunteer-avatar: solo admin y RPC con operator_id del JWT", async () => {
+  const body = { volunteer_id: VID, path: `${vid}/foto.png`, operator_id: "hacker" };
+  for (const role of ["guard", "volunteer", null]) {
+    const f = fake({ role });
+    assertEquals((await createHandler(setVolunteerAvatarSpec, f.deps)(req(body))).status, 403, `role=${role}`);
+    assertEquals(f.calls.length, 0);
+  }
+  const f = fake({ user: "admin-1" });
+  await createHandler(setVolunteerAvatarSpec, f.deps)(req(body));
+  assertEquals(f.calls, [
+    { fn: "set_volunteer_avatar", args: { p_volunteer_id: vid, p_path: `${vid}/foto.png`, p_operator_id: "admin-1" } },
+  ]);
 });
 
 const volunteerCases = [

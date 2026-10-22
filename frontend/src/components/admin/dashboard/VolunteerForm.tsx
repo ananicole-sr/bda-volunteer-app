@@ -5,9 +5,14 @@ import {
   Text,
   TextInput,
   TouchableOpacity,
+  Image,
 } from 'react-native';
-import { createRegistrationRequestId, registerVolunteerAccount } from '@/services/volunteers';
-import type { RegisterVolunteerAccountInput } from '@/types/volunteer';
+import * as ImagePicker from 'expo-image-picker';
+import { createRegistrationRequestId, registerVolunteerAccount, setVolunteerAvatar } from '@/services/volunteers';
+import type { AvatarFile, RegisterVolunteerAccountInput } from '@/types/volunteer';
+
+// Igual que el limite del bucket volunteer-avatars (migracion 009).
+const AVATAR_MAX_BYTES = 2 * 1024 * 1024;
 
 interface VolunteerFormProps {
   submitLabel?: string;
@@ -22,6 +27,26 @@ export default function VolunteerForm({
   const [clientRequestId, setClientRequestId] = useState<string | null>(null);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
+  const [photo, setPhoto] = useState<AvatarFile | null>(null);
+  // Alta hecha pero la foto fallo: se puede reintentar (el alta se repite como replayed) o seguir sin foto.
+  const [photoFailedFor, setPhotoFailedFor] = useState<string | null>(null);
+
+  const pickPhoto = async () => {
+    const result = await ImagePicker.launchImageLibraryAsync({
+      mediaTypes: ['images'],
+      allowsEditing: true,
+      aspect: [1, 1],
+      quality: 0.7,
+    });
+    if (result.canceled) return;
+
+    const asset = result.assets[0];
+    if (asset.fileSize && asset.fileSize > AVATAR_MAX_BYTES) {
+      setError('La foto pesa más de 2 MB. Elige otra.'); return;
+    }
+    setError('');
+    setPhoto({ uri: asset.uri, mimeType: asset.mimeType });
+  };
 
   const submit = async () => {
     if (!form.fullName.trim() || !form.community.trim() || !form.uid.trim() || !form.email.trim() || !form.password) {
@@ -32,13 +57,61 @@ export default function VolunteerForm({
     try {
       const input: RegisterVolunteerAccountInput = { clientRequestId: requestId, fullName: form.fullName.trim(), community: form.community.trim(), uid: form.uid.trim(), email: form.email.trim(), password: form.password };
       const result = await registerVolunteerAccount(input);
-      if (result.code === 'ok') onRegistered(result.volunteer.id);
-      else setError(result.message ?? 'No se pudo registrar el voluntario.');
+      if (result.code !== 'ok') { setError(result.message ?? 'No se pudo registrar el voluntario.'); return; }
+
+      const volunteerId = result.volunteer.id;
+      if (photo) {
+        try {
+          const photoResult = await setVolunteerAvatar(volunteerId, photo);
+          if (photoResult.code !== 'ok') throw new Error(photoResult.message ?? 'No se pudo guardar la foto.');
+        } catch (photoErr) {
+          setPhotoFailedFor(volunteerId);
+          setError(`El voluntario se registró, pero la foto no se guardó: ${photoErr instanceof Error ? photoErr.message : 'error desconocido'}`);
+          return;
+        }
+      }
+      onRegistered(volunteerId);
     } catch (err) { setError(err instanceof Error ? err.message : 'No se pudo registrar el voluntario. Intenta de nuevo.'); }
     finally { setSubmitting(false); }
   };
   return (
     <View>
+      <View className="mb-4 items-center rounded-2xl border border-zinc-200 bg-white p-5">
+        {photo ? (
+          <Image source={{ uri: photo.uri }} className="h-24 w-24 rounded-full" />
+        ) : (
+          <View className="h-24 w-24 items-center justify-center rounded-full bg-zinc-200">
+            <Text className="text-3xl font-extrabold text-zinc-500">
+              {form.fullName.trim().charAt(0).toUpperCase() || '?'}
+            </Text>
+          </View>
+        )}
+
+        <View className="mt-3 flex-row gap-2">
+          <TouchableOpacity
+            disabled={submitting}
+            onPress={pickPhoto}
+            className="rounded-xl border border-[#e88e29] px-4 py-2"
+          >
+            <Text className="text-xs font-bold text-[#e88e29]">
+              {photo ? 'Cambiar foto' : 'Agregar foto'}
+            </Text>
+          </TouchableOpacity>
+
+          {photo ? (
+            <TouchableOpacity
+              disabled={submitting}
+              onPress={() => setPhoto(null)}
+              className="rounded-xl border border-zinc-300 px-4 py-2"
+            >
+              <Text className="text-xs font-bold text-zinc-600">Quitar</Text>
+            </TouchableOpacity>
+          ) : null}
+        </View>
+
+        <Text className="mt-2 text-[10px] text-[#666665]">Opcional · JPG, PNG o WEBP, máximo 2 MB.</Text>
+      </View>
+
       <View className="rounded-2xl border border-zinc-200 bg-white p-5">
         <Text className="mb-5 text-sm font-extrabold text-zinc-900">
           Información del voluntario
@@ -151,9 +224,19 @@ export default function VolunteerForm({
       {error ? <Text className="mt-4 text-xs font-semibold text-red-600">{error}</Text> : null}
       <TouchableOpacity disabled={submitting} onPress={submit} className={`mt-5 items-center rounded-xl bg-[#e88e29] py-4 ${submitting ? 'opacity-60' : ''}`}>
         <Text className="text-sm font-bold text-white">
-          {submitting ? 'Registrando…' : submitLabel}
+          {submitting ? 'Registrando…' : photoFailedFor ? 'Reintentar foto' : submitLabel}
         </Text>
       </TouchableOpacity>
+
+      {photoFailedFor ? (
+        <TouchableOpacity
+          disabled={submitting}
+          onPress={() => onRegistered(photoFailedFor)}
+          className="mt-3 items-center py-2"
+        >
+          <Text className="text-xs font-bold text-[#666665]">Continuar sin foto</Text>
+        </TouchableOpacity>
+      ) : null}
 
 
     </View>

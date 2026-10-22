@@ -19,9 +19,11 @@ import {
   parseMarkNotificationsRead,
   parseMarkRedemptionDelivered,
   parseRedeemRewards,
+  parseSetVolunteerAvatar,
   parseUpdateReward,
   parseUpdateVolunteer,
   type RedeemRewardsBody,
+  type SetVolunteerAvatarBody,
   type UpdateRewardBody,
   type UpdateVolunteerBody,
 } from "./validate.ts";
@@ -89,6 +91,16 @@ export const deactivateVolunteerSpec: FunctionSpec<DeactivateVolunteerBody> = {
   toRpc: (b, _hmac, operatorId) => ({
     fn: "deactivate_volunteer",
     args: { p_volunteer_id: b.volunteer_id, p_operator_id: operatorId },
+  }),
+};
+
+export const setVolunteerAvatarSpec: FunctionSpec<SetVolunteerAvatarBody> = {
+  name: "set-volunteer-avatar",
+  roles: ["admin"],
+  parse: parseSetVolunteerAvatar,
+  toRpc: (b, _hmac, operatorId) => ({
+    fn: "set_volunteer_avatar",
+    args: { p_volunteer_id: b.volunteer_id, p_path: b.path, p_operator_id: operatorId },
   }),
 };
 

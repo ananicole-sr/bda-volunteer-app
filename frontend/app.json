@@ -31,7 +31,13 @@
           "imageWidth": 76
         }
       ],
-      "react-native-nfc-manager"
+      "react-native-nfc-manager",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "La app necesita acceso a tus fotos para agregar la foto de perfil del voluntario."
+        }
+      ]
     ],
     "experiments": {
       "typedRoutes": true,

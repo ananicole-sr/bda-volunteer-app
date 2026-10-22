@@ -32,6 +32,18 @@ export type DeactivateVolunteerResult =
     }
   | { code: 'volunteer_not_found'; message?: string };
 
+/** Respuesta de negocio de set-volunteer-avatar (docs/nfc-contract.md, funcion 14). */
+export type SetVolunteerAvatarResult =
+  | { code: 'ok'; volunteer: { id: string; avatar_url: string } }
+  | { code: 'volunteer_not_found' | 'avatar_not_found'; message?: string };
+
+/** Imagen elegida en el dispositivo (subconjunto de ImagePickerAsset). */
+export interface AvatarFile {
+  uri: string;
+  /** image/jpeg, image/png o image/webp. Si falta se asume jpeg. */
+  mimeType?: string | null;
+}
+
 export interface VolunteerRow {
   id: string;
   full_name: string;

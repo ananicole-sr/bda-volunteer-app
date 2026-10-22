@@ -1,7 +1,7 @@
 import { pageRange, toPage } from '@/lib/pagination';
 import { supabase } from '@/lib/supabase';
 import { mapRequestRow, REQUEST_SELECT } from '@/services/redemptions';
-import { formatLastVisit } from '@/services/volunteers';
+import { avatarUrl, formatLastVisit } from '@/services/volunteers';
 import type { RedemptionRequest } from '@/types/redemption';
 import type {
   MyCheckIn,
@@ -93,7 +93,7 @@ export async function getMyVolunteerProfile(): Promise<MyVolunteerProfile> {
     community: data.community,
     points: data.points,
     lastVisit: formatLastVisit(data.last_check_in_at),
-    avatar: data.avatar_url ?? undefined,
+    avatar: avatarUrl(data.avatar_url),
     isActive: data.is_active,
     totalVisits: data.total_visits,
     lastCheckInAt: data.last_check_in_at,

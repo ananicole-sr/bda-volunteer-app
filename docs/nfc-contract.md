@@ -119,6 +119,16 @@ Alta con cuenta de acceso (supabase/007_volunteer_registration.sql). enroll-volu
    HTTP 500 server_error = la operación quedó a medias de forma recuperable: reintentar con el mismo client_request_id.
    La cuenta se crea con el email ya confirmado. La contraseña no se guarda en tablas, auditoría ni logs.
 
+Foto de perfil (supabase/009_volunteer_avatars.sql).
+14) set-volunteer-avatar (rol: admin)
+   Antes: el admin sube la imagen con su sesión al bucket público "volunteer-avatars" en la ruta
+          "<volunteer_id>/<nombre>.<ext>" (jpeg/png/webp, máx. 2 MB). Solo admins pueden escribir en el bucket.
+   Request:  { volunteer_id: uuid, path: "<volunteer_id>/<nombre>.(jpg|jpeg|png|webp)" }   nombre: [A-Za-z0-9_-]{1,64}
+   Response: { code, message?, volunteer?: { id, avatar_url } }
+   Códigos: ok | volunteer_not_found | avatar_not_found (el archivo no está en el bucket)
+   volunteers.avatar_url guarda la ruta, no la URL; el cliente arma la URL pública. Valores que empiezan con
+   http(s) (datos viejos o seed) se usan tal cual.
+
 Cambio de contraseña (opcional, sin Edge Function): el usuario con sesión usa supabase.auth.updateUser({ password })
 tras verificar su contraseña actual. Nunca recibe un id de usuario.
 

@@ -19,6 +19,7 @@ que reciben `uid`) y llama a la funcion SQL con `service_role`.
 | `mark-redemption-delivered` | admin    | `mark_redemption_delivered` | 006  |
 | `mark-notifications-read` | admin      | `mark_admin_notifications_read` | 006 |
 | `register-volunteer-account` | admin   | `begin_` / `complete_` / `fail_volunteer_registration` + `auth.admin.createUser` | 007 |
+| `set-volunteer-avatar` | admin         | `set_volunteer_avatar` | 009       |
 
 `register-volunteer-account` no usa `createHandler`: orquesta SQL + Supabase
 Auth en `_shared/registration.ts` (reusa `authorize()` para JWT y rol).
@@ -90,7 +91,8 @@ Para `update-volunteer` y `deactivate-volunteer` (migracion 003) seguir
 notificaciones (migracion 006), `docs/deploy-006-redemptions.md`. Para el
 alta con cuenta (migracion 007), `docs/deploy-007-volunteer-registration.md`.
 Para CORS y la correccion de `issue_card` (migracion 008),
-`docs/deploy-008-cors-issue-card.md`.
+`docs/deploy-008-cors-issue-card.md`. Para la foto de perfil (migracion 009),
+`docs/deploy-009-volunteer-avatars.md`.
 
 Por defecto Supabase exige un JWT valido en el gateway (`verify_jwt`); ademas
 cada funcion lo revalida con `auth.getUser` y comprueba el rol. Antes de
